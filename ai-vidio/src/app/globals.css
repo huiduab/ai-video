@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f6f8fe;
+  --foreground: #0f172a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+::selection {
+  background: #1554ff;
+  color: #ffffff;
+}
+
+.media-frame {
+  background:
+    radial-gradient(circle at 26% 28%, rgba(94, 234, 212, 0.35), transparent 23%),
+    radial-gradient(circle at 80% 18%, rgba(255, 255, 255, 0.55), transparent 9%),
+    linear-gradient(135deg, #071421 0%, #12323d 42%, #81958e 100%);
+}
+
+.city-frame {
+  background:
+    linear-gradient(90deg, rgba(5, 12, 23, 0.9), rgba(11, 42, 51, 0.42)),
+    repeating-linear-gradient(90deg, transparent 0 34px, rgba(255, 255, 255, 0.14) 35px 38px),
+    linear-gradient(180deg, #132532, #8aa8a6);
+}
+
+.portal-frame {
+  background:
+    radial-gradient(circle at 50% 48%, rgba(255, 255, 255, 0.95), rgba(94, 234, 212, 0.32) 16%, transparent 28%),
+    linear-gradient(135deg, #07111e, #183747 56%, #d9f4f1);
+}
+
+.planet-frame {
+  background:
+    radial-gradient(circle at 42% 38%, #0e2431 0 20%, #51a7a9 21%, #0c1724 22% 31%, transparent 32%),
+    radial-gradient(circle at 70% 18%, rgba(255, 255, 255, 0.7), transparent 8%),
+    linear-gradient(160deg, #03111f 0%, #18434b 56%, #d6ece9 100%);
+}
+
+.soft-grid {
+  background-image:
+    linear-gradient(rgba(21, 84, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(21, 84, 255, 0.08) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
