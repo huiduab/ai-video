@@ -6,13 +6,19 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "db:push": "prisma db push",
+    "db:generate": "prisma generate"
   },
   "dependencies": {
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
     "@tailwindcss/postcss": "^4.1.8",
     "clsx": "^2.1.1",
     "lucide-react": "^0.511.0",
     "next": "^15.3.3",
+    "pg": "^8.21.0",
+    "prisma": "^7.8.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "tailwind-merge": "^3.3.0",

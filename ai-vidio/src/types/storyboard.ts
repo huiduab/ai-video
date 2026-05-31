@@ -2,7 +2,11 @@ export interface StoryboardFrame {
   id: string;
   index: number;
   title: string;
-  duration: string;
-  startTime: string;
-  thumbnailClass: string;
+  startMs: number;
+  durationMs: number;
+  thumbnailUrl: string | null;
+  prompt: string;
+  narration: string;
+  visualConfig: unknown;
+  animationConfig: unknown;
 }

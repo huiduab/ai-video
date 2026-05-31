@@ -1,18 +1,20 @@
+import Link from "next/link";
 import { ArrowRight, Code2, Image, PenLine, Sparkle, SlidersHorizontal, Table2 } from "lucide-react";
+import type { ProjectMode } from "@/types/project";
 
 const principles = [
-  { title: "化繁为简", desc: "极简界面与清晰流程，让创作回归专注与高效。", icon: PenLine },
-  { title: "可控可调", desc: "从分镜到镜头，从节奏到细节，精细控制每一帧呈现。", icon: SlidersHorizontal },
-  { title: "模块化生成", desc: "分镜驱动，模块组合，支持复用与一致性管理。", icon: Table2 },
-  { title: "AI 辅助创意", desc: "从灵感到脚本到画面，AI 助你突破创作边界。", icon: Sparkle },
+  { title: "化繁为简", desc: "清晰流程让创作回到内容本身。", icon: PenLine },
+  { title: "可控可调", desc: "从分镜、节奏到画面细节都能继续编辑。", icon: SlidersHorizontal },
+  { title: "模块化生成", desc: "分镜、素材、动画和导出任务都可复用扩展。", icon: Table2 },
+  { title: "AI 辅助创意", desc: "从灵感到脚本再到画面，逐步生成并保留控制权。", icon: Sparkle },
 ];
 
 export function ConceptCards() {
   return (
-    <section id="功能" className="mx-auto grid max-w-[1200px] grid-cols-1 gap-6 px-6 py-10 lg:grid-cols-3">
+    <section id="modes" className="mx-auto grid max-w-[1200px] grid-cols-1 gap-6 px-6 py-10 lg:grid-cols-3">
       <article className="rounded-2xl border border-slate-200 bg-white p-9 shadow-sm">
-        <h2 className="text-2xl font-semibold text-slate-950">我们的设计理念</h2>
-        <p className="mt-3 text-sm text-slate-600">以人为本 · AI 增强 · 控制在你手中</p>
+        <h2 className="text-2xl font-semibold text-slate-950">设计原则</h2>
+        <p className="mt-3 text-sm text-slate-600">以人为本、AI 增强、数据可追踪。</p>
         <div className="mt-8 grid grid-cols-2 gap-7">
           {principles.map((item) => (
             <div key={item.title}>
@@ -27,18 +29,20 @@ export function ConceptCards() {
       </article>
 
       <ModeCard
+        mode="slideshow"
         icon={<Image size={24} />}
         tone="bg-[#ded8ff] text-[#1554ff]"
         title="图片轮播模式"
         subtitle="Image Slideshow Mode"
-        desc="AI 生成分镜图片，通过播放与平移营造动画感，快速生成富有表现力的视频。"
+        desc="创建数据库项目后，以分镜图片、平移缩放和转场快速生成视频。"
       />
       <ModeCard
+        mode="html-animation"
         icon={<Code2 size={26} />}
         tone="bg-emerald-300 text-emerald-950"
-        title="HTML动画模式"
+        title="HTML 动画模式"
         subtitle="HTML Animation Mode"
-        desc="AI 基于分镜镜头生成 HTML 动画，再智能组合成完整视频，实现更自由的视觉表达。"
+        desc="创建数据库项目后，用 HTML/CSS 动画片段组合更自由的视觉表达。"
         glow
       />
     </section>
@@ -46,6 +50,7 @@ export function ConceptCards() {
 }
 
 function ModeCard({
+  mode,
   icon,
   tone,
   title,
@@ -53,6 +58,7 @@ function ModeCard({
   desc,
   glow = false,
 }: {
+  mode: ProjectMode;
   icon: React.ReactNode;
   tone: string;
   title: string;
@@ -61,7 +67,10 @@ function ModeCard({
   glow?: boolean;
 }) {
   return (
-    <article className="relative min-h-[420px] overflow-hidden rounded-2xl border border-slate-200 bg-white p-9 shadow-sm">
+    <Link
+      href={`/create?mode=${mode}`}
+      className="group relative min-h-[420px] overflow-hidden rounded-2xl border border-slate-200 bg-white p-9 shadow-sm transition hover:-translate-y-0.5 hover:border-[#97b5ff] hover:shadow-md"
+    >
       {glow && <div className="absolute -bottom-20 -right-12 size-64 rounded-full bg-cyan-200/50 blur-3xl" />}
       <div className={`relative flex size-14 items-center justify-center rounded-2xl ${tone}`}>{icon}</div>
       <div className="relative mt-28">
@@ -69,9 +78,10 @@ function ModeCard({
         <p className="mt-2 text-sm text-slate-500">{subtitle}</p>
         <p className="mt-5 max-w-[250px] text-sm leading-7 text-slate-600">{desc}</p>
       </div>
-      <button aria-label={`${title}详情`} className="absolute bottom-8 right-8 flex size-11 items-center justify-center rounded-full bg-[#dbe8ff] text-[#1554ff] transition hover:bg-[#1554ff] hover:text-white">
+      <span className="absolute bottom-8 right-8 flex size-11 items-center justify-center rounded-full bg-[#dbe8ff] text-[#1554ff] transition group-hover:bg-[#1554ff] group-hover:text-white">
         <ArrowRight size={21} />
-      </button>
-    </article>
+      </span>
+    </Link>
   );
 }
+

@@ -3,9 +3,19 @@
 import { Captions, ChevronDown, Download, Maximize, Music2, Volume2 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/cn";
-export function EditorToolbar() {
+import type { ProjectMode } from "@/types/project";
+
+interface EditorToolbarProps {
+  activeMode: ProjectMode;
+  onModeChange: (mode: ProjectMode) => void;
+}
+
+export function EditorToolbar({ activeMode, onModeChange }: EditorToolbarProps) {
   const [captionsEnabled, setCaptionsEnabled] = useState(true);
   const [volume, setVolume] = useState(62);
+
+  void activeMode;
+  void onModeChange;
 
   return (
     <div className="flex h-[72px] items-center gap-3 border-b border-slate-200 bg-[#f7f9ff] px-5 py-2">
@@ -17,17 +27,9 @@ export function EditorToolbar() {
             type="button"
             aria-label={captionsEnabled ? "关闭字幕" : "开启字幕"}
             onClick={() => setCaptionsEnabled((value) => !value)}
-            className={cn(
-              "relative h-6 w-11 rounded-full transition",
-              captionsEnabled ? "bg-[#1554ff]" : "bg-slate-300",
-            )}
+            className={cn("relative h-6 w-11 rounded-full transition", captionsEnabled ? "bg-[#1554ff]" : "bg-slate-300")}
           >
-            <span
-              className={cn(
-                "absolute top-1 size-4 rounded-full bg-white shadow-sm transition",
-                captionsEnabled ? "left-6" : "left-1",
-              )}
-            />
+            <span className={cn("absolute top-1 size-4 rounded-full bg-white shadow-sm transition", captionsEnabled ? "left-6" : "left-1")} />
           </button>
         </label>
 
@@ -52,7 +54,6 @@ export function EditorToolbar() {
           />
           <ChevronDown size={16} className="text-slate-500" />
         </div>
-
       </div>
 
       <div className="ml-auto flex shrink-0 items-center gap-3">

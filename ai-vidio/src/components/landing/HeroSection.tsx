@@ -8,23 +8,23 @@ export function HeroSection() {
       <div>
         <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[#cddcff] bg-[#eef4ff] px-4 py-2 text-sm font-medium text-[#1554ff]">
           <Sparkles size={16} />
-          AI 驱动 · 专业级视频生成
+          AI 驱动的视频创作工作台
         </div>
         <h1 className="text-5xl font-bold leading-tight tracking-normal text-slate-950 md:text-6xl">
-          让<span className="text-[#1554ff]">创意</span>流动，
+          让创意流动，
           <br />
-          让<span className="text-[#1554ff]">视频</span>更出色
+          让视频成片
         </h1>
         <p className="mt-7 max-w-[580px] text-base leading-8 text-slate-700">
-          MotionWeave AI 通过智能生成与模块化工作流，将你的故事从分镜脚本无缝转化为惊艳视频。
+          MotionWeave AI 将创作模式、项目历史和分镜参数写入 PostgreSQL，让每一次创作都可以保存、恢复和扩展。
         </p>
         <div className="mt-9 flex flex-wrap gap-4">
-          <Link href="/workspace">
-            <Button size="lg">开始创作</Button>
+          <Link href="#modes">
+            <Button size="lg">选择创作模式</Button>
           </Link>
           <Button variant="secondary" size="lg">
             <Play size={18} fill="currentColor" />
-            观看演示
+            查看演示
           </Button>
         </div>
       </div>
@@ -45,3 +45,4 @@ export function HeroSection() {
     </section>
   );
 }
+
