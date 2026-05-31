@@ -27,3 +27,10 @@
 - `npm run build` passes.
 - Local workspace route runs on `http://127.0.0.1:3001/workspace`.
 - CSS loads correctly after clearing `.next` and restarting the dev server.
+
+### Toolbar refinement
+
+- Replaced the workspace mode switch in the editor toolbar with production-style controls.
+- Added subtitle toggle, background music selector, volume slider, fullscreen action, and export action.
+- Fixed fullscreen and export controls to the right side of the workspace toolbar.
+- Kept the project-selected video mode as the source of truth for the active timeline.
