@@ -21,6 +21,8 @@ interface TimelinePanelProps {
   totalDuration: string;
   onAdd: () => void;
   onSelect: (id: string) => void;
+  actionSlot?: ReactNode;
+  showAddActions?: boolean;
 }
 
 export function TimelinePanel({
@@ -32,6 +34,8 @@ export function TimelinePanel({
   totalDuration,
   onAdd,
   onSelect,
+  actionSlot,
+  showAddActions = true,
 }: TimelinePanelProps) {
   return (
     <section className="flex h-[205px] flex-col rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm">
@@ -41,14 +45,19 @@ export function TimelinePanel({
           <p className="truncate text-xs text-slate-600">{description}</p>
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          <Button variant="secondary" onClick={onAdd}>
-            <Plus size={16} />
-            {addLabel}
-          </Button>
-          <Button variant="secondary">
-            <ArrowLeftRight size={16} />
-            调整顺序
-          </Button>
+          {actionSlot}
+          {showAddActions && (
+            <>
+              <Button variant="secondary" onClick={onAdd}>
+                <Plus size={16} />
+                {addLabel}
+              </Button>
+              <Button variant="secondary">
+                <ArrowLeftRight size={16} />
+                调整顺序
+              </Button>
+            </>
+          )}
           <div className="border-l border-slate-200 pl-3 text-xs text-slate-700">
             <span>总时长</span>
             <div className="mt-0.5 font-mono text-sm text-slate-950">{totalDuration}</div>
@@ -103,4 +112,3 @@ export function TimelinePanel({
     </section>
   );
 }
-

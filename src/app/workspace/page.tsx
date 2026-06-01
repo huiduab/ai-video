@@ -132,7 +132,7 @@ function WorkspaceContent() {
           onSelect={handleSelectProject}
         />
         {content}
-        <AssistantPanel />
+        <AssistantPanel projectId={selectedProject?.id ?? ""} />
       </div>
     </div>
   );
@@ -145,4 +145,3 @@ export default function WorkspacePage() {
     </Suspense>
   );
 }
-

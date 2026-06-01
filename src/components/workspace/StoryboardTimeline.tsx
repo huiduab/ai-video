@@ -1,39 +1,89 @@
 "use client";
 
-import { Code2 } from "lucide-react";
+import { Code2, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { TimelinePanel, type TimelineItem } from "@/components/workspace/TimelinePanel";
-import { formatDuration } from "@/lib/project-mappers";
+import { formatDuration, formatRelativeTime } from "@/lib/project-mappers";
 import type { ProjectMode } from "@/types/project";
-import type { StoryboardFrame } from "@/types/storyboard";
+import type { GeneratedStoryboardOption, StoryboardFrame } from "@/types/storyboard";
 
 interface StoryboardTimelineProps {
   projectId: string;
   mode: ProjectMode;
+  onActiveFrameChange?: (frame: StoryboardFrame | null, storyboard: GeneratedStoryboardOption | null) => void;
 }
 
-export function StoryboardTimeline({ projectId, mode }: StoryboardTimelineProps) {
-  const [frames, setFrames] = useState<StoryboardFrame[]>([]);
+function sceneToFrame(scene: GeneratedStoryboardOption["script"]["scenes"][number], startMs: number): StoryboardFrame {
+  const durationMs = scene.durationMs ?? 5000;
+
+  return {
+    id: `generated-scene-${scene.index}`,
+    index: scene.index,
+    title: scene.title,
+    startMs,
+    durationMs,
+    thumbnailUrl: null,
+    prompt: scene.visualPrompt,
+    narration: scene.narration,
+    visualConfig: {
+      generated: true,
+      visualPrompt: scene.visualPrompt,
+    },
+    animationConfig: {
+      generated: true,
+      animationPrompt: scene.animationPrompt ?? "",
+    },
+  };
+}
+
+function storyboardToFrames(storyboard: GeneratedStoryboardOption | null): StoryboardFrame[] {
+  if (!storyboard) {
+    return [];
+  }
+
+  let startMs = 0;
+
+  return storyboard.script.scenes.map((scene) => {
+    const frame = sceneToFrame(scene, startMs);
+    startMs += frame.durationMs;
+    return frame;
+  });
+}
+
+export function StoryboardTimeline({ projectId, mode, onActiveFrameChange }: StoryboardTimelineProps) {
+  const [storyboards, setStoryboards] = useState<GeneratedStoryboardOption[]>([]);
+  const [activeMessageId, setActiveMessageId] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const loadFrames = useCallback(async () => {
+  const activeStoryboard = useMemo(
+    () => storyboards.find((storyboard) => storyboard.messageId === activeMessageId) ?? storyboards[0] ?? null,
+    [activeMessageId, storyboards],
+  );
+  const frames = useMemo(() => storyboardToFrames(activeStoryboard), [activeStoryboard]);
+
+  const loadGeneratedStoryboards = useCallback(async () => {
     setLoading(true);
     setError("");
 
     try {
-      const response = await fetch(`/api/projects/${projectId}/storyboard`, { cache: "no-store" });
-      const payload = (await response.json()) as { items?: StoryboardFrame[]; error?: string };
+      const response = await fetch(`/api/projects/${projectId}/agent/storyboards`, { cache: "no-store" });
+      const payload = (await response.json()) as {
+        items?: GeneratedStoryboardOption[];
+        activeMessageId?: string;
+        error?: string;
+      };
 
       if (!response.ok || !payload.items) {
-        throw new Error(payload.error ?? "分镜加载失败");
+        throw new Error(payload.error ?? "生成分镜加载失败");
       }
 
-      setFrames(payload.items);
-      setSelectedId((current) => current || payload.items?.[0]?.id || "");
+      setStoryboards(payload.items);
+      setActiveMessageId(payload.activeMessageId ?? payload.items[0]?.messageId ?? "");
+      setSelectedId("");
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "分镜加载失败");
+      setError(loadError instanceof Error ? loadError.message : "生成分镜加载失败");
     } finally {
       setLoading(false);
     }
@@ -41,25 +91,42 @@ export function StoryboardTimeline({ projectId, mode }: StoryboardTimelineProps)
 
   useEffect(() => {
     setSelectedId("");
-    void loadFrames();
-  }, [loadFrames]);
+    void loadGeneratedStoryboards();
+  }, [loadGeneratedStoryboards]);
 
-  async function addFrame() {
-    const response = await fetch(`/api/projects/${projectId}/storyboard`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
+  useEffect(() => {
+    const nextFrame = frames.find((frame) => frame.id === selectedId) ?? frames[0] ?? null;
 
-    const payload = (await response.json()) as { scene?: StoryboardFrame; error?: string };
-
-    if (!response.ok || !payload.scene) {
-      setError(payload.error ?? "新增分镜失败");
-      return;
+    if (nextFrame && nextFrame.id !== selectedId) {
+      setSelectedId(nextFrame.id);
     }
 
-    setFrames((current) => [...current, payload.scene!]);
-    setSelectedId(payload.scene.id);
+    onActiveFrameChange?.(nextFrame, activeStoryboard);
+  }, [activeStoryboard, frames, onActiveFrameChange, selectedId]);
+
+  async function selectStoryboard(messageId: string) {
+    setActiveMessageId(messageId);
+    setSelectedId("");
+
+    try {
+      const response = await fetch(`/api/projects/${projectId}/agent/storyboards`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ activeMessageId: messageId }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error ?? "切换分镜失败");
+      }
+    } catch (selectError) {
+      setError(selectError instanceof Error ? selectError.message : "切换分镜失败");
+    }
+  }
+
+  function handleSelectFrame(id: string) {
+    setSelectedId(id);
+    onActiveFrameChange?.(frames.find((frame) => frame.id === id) ?? null, activeStoryboard);
   }
 
   const items: TimelineItem[] = useMemo(
@@ -85,7 +152,7 @@ export function StoryboardTimeline({ projectId, mode }: StoryboardTimelineProps)
   );
 
   if (loading) {
-    return <div className="flex h-[205px] items-center justify-center rounded-xl border border-slate-200 bg-white text-sm text-slate-600">正在加载分镜...</div>;
+    return <div className="flex h-[205px] items-center justify-center rounded-xl border border-slate-200 bg-white text-sm text-slate-600">正在加载 Agent 生成分镜...</div>;
   }
 
   if (error) {
@@ -93,7 +160,7 @@ export function StoryboardTimeline({ projectId, mode }: StoryboardTimelineProps)
       <div className="flex h-[205px] items-center justify-center rounded-xl border border-slate-200 bg-white text-center text-sm text-slate-600">
         <div>
           <p>{error}</p>
-          <button className="mt-3 rounded-full bg-[#1554ff] px-4 py-1.5 text-white" onClick={loadFrames}>
+          <button className="mt-3 rounded-full bg-[#1554ff] px-4 py-1.5 text-white" onClick={loadGeneratedStoryboards}>
             重试
           </button>
         </div>
@@ -101,16 +168,54 @@ export function StoryboardTimeline({ projectId, mode }: StoryboardTimelineProps)
     );
   }
 
+  if (!activeStoryboard) {
+    return (
+      <div className="flex h-[205px] items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white text-center text-sm text-slate-600">
+        <div>
+          <p className="font-medium text-slate-900">暂无 Agent 生成分镜</p>
+          <p className="mt-2">在右侧 AI 助手中输入“生成视频大纲”，生成后这里会显示真实分镜。</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <TimelinePanel
-      title={mode === "html-animation" ? "HTML 动画时间线" : "分镜时间线"}
-      description="分镜参数来自 PostgreSQL，可刷新后继续编辑。"
-      addLabel={mode === "html-animation" ? "添加场景" : "添加分镜"}
+      title={mode === "html-animation" ? "当前 HTML 动画分镜" : "当前图片轮播分镜"}
+      description={`来自 Agent：${activeStoryboard.title}`}
+      addLabel="刷新"
       items={items}
       selectedId={selectedId}
       totalDuration={formatDuration(frames.reduce((sum, frame) => sum + frame.durationMs, 0))}
-      onAdd={addFrame}
-      onSelect={setSelectedId}
+      onAdd={loadGeneratedStoryboards}
+      onSelect={handleSelectFrame}
+      showAddActions={false}
+      actionSlot={
+        <div className="flex items-center gap-2">
+          {storyboards.length > 1 && (
+            <select
+              aria-label="选择 Agent 生成分镜"
+              value={activeStoryboard.messageId}
+              onChange={(event) => void selectStoryboard(event.target.value)}
+              className="h-9 max-w-56 rounded-lg border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 outline-none focus:border-[#1554ff]"
+            >
+              {storyboards.map((storyboard) => (
+                <option key={storyboard.messageId} value={storyboard.messageId}>
+                  {storyboard.title} · {formatRelativeTime(storyboard.createdAt)}
+                </option>
+              ))}
+            </select>
+          )}
+          <button
+            type="button"
+            onClick={loadGeneratedStoryboards}
+            className="flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 transition hover:border-[#1554ff] hover:text-[#1554ff]"
+          >
+            <RefreshCw size={14} />
+            刷新
+          </button>
+        </div>
+      }
     />
   );
 }

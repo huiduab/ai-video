@@ -7,10 +7,16 @@ import { cn } from "@/lib/cn";
 interface VideoPreviewProps {
   large?: boolean;
   className?: string;
+  title?: string;
+  narration?: string;
+  prompt?: string;
+  currentTime?: string;
+  totalTime?: string;
 }
 
-export function VideoPreview({ large = false, className }: VideoPreviewProps) {
+export function VideoPreview({ large = false, className, title, narration, prompt, currentTime = "00:00", totalTime = "00:00" }: VideoPreviewProps) {
   const [playing, setPlaying] = useState(false);
+  const hasGeneratedContent = Boolean(title || narration || prompt);
 
   return (
     <section
@@ -28,6 +34,14 @@ export function VideoPreview({ large = false, className }: VideoPreviewProps) {
       <div className="absolute right-[8%] top-[20%] h-[70%] w-[5%] rounded-t-full bg-black/25" />
       <div className="absolute left-1/2 top-[2%] h-[58%] w-[30%] -translate-x-1/2 rounded-full border border-white/15 bg-teal-100/20 blur-[1px]" />
 
+      {hasGeneratedContent && (
+        <div className="absolute left-5 top-5 z-10 max-w-[58%] rounded-xl bg-slate-950/58 p-4 text-white backdrop-blur">
+          <h2 className="text-lg font-semibold">{title}</h2>
+          {narration && <p className="mt-2 line-clamp-3 text-sm leading-6 text-white/86">{narration}</p>}
+          {prompt && <p className="mt-2 line-clamp-2 text-xs leading-5 text-white/62">画面：{prompt}</p>}
+        </div>
+      )}
+
       <button
         aria-label={playing ? "暂停预览" : "播放预览"}
         onClick={() => setPlaying((value) => !value)}
@@ -38,7 +52,7 @@ export function VideoPreview({ large = false, className }: VideoPreviewProps) {
 
       <div className="absolute inset-x-5 bottom-4 z-10 flex items-center gap-3 text-white">
         <Play size={18} fill="currentColor" />
-        <span className="font-mono text-xs">00:08 / 00:30</span>
+        <span className="font-mono text-xs">{currentTime} / {totalTime}</span>
         <div className="h-1.5 flex-1 rounded-full bg-white/24">
           <div className="h-full w-[38%] rounded-full bg-[#1554ff]" />
         </div>

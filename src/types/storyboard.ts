@@ -10,3 +10,11 @@ export interface StoryboardFrame {
   visualConfig: unknown;
   animationConfig: unknown;
 }
+
+export interface GeneratedStoryboardOption {
+  messageId: string;
+  title: string;
+  summary: string;
+  createdAt: string;
+  script: import("@/types/agent").VideoScriptResult;
+}
