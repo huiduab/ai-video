@@ -58,6 +58,10 @@ export function ProjectSidebar({ projects, selectedId, loading, onRefresh, onSel
                 )}
               >
                 <div className="media-frame relative h-16 w-24 shrink-0 overflow-hidden rounded-lg">
+                  {project.thumbnailUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={project.thumbnailUrl} alt={`${project.title} 封面`} className="absolute inset-0 size-full object-cover" />
+                  )}
                   <span className="absolute bottom-2 right-2 rounded bg-black/65 px-2 py-0.5 font-mono text-xs text-white">
                     {formatDuration(project.durationMs)}
                   </span>
@@ -88,4 +92,3 @@ export function ProjectSidebar({ projects, selectedId, loading, onRefresh, onSel
     </aside>
   );
 }
-

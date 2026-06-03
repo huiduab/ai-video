@@ -16,6 +16,7 @@ function WorkspaceContent() {
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [selectedProject, setSelectedProject] = useState<ProjectItem | null>(null);
   const [activeMode, setActiveMode] = useState<ProjectMode>("slideshow");
+  const [storyboardRefreshKey, setStoryboardRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -65,21 +66,14 @@ function WorkspaceContent() {
     [router],
   );
 
-  const handleModeChange = useCallback(
-    async (mode: ProjectMode) => {
-      if (!selectedProject) {
+  const handleDurationChange = useCallback(
+    (durationMs: number) => {
+      if (!selectedProject || durationMs <= 0) {
         return;
       }
 
-      setActiveMode(mode);
-      setSelectedProject({ ...selectedProject, mode });
-      setProjects((items) => items.map((item) => (item.id === selectedProject.id ? { ...item, mode } : item)));
-
-      await fetch(`/api/projects/${selectedProject.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode }),
-      });
+      setSelectedProject((current) => (current && current.id === selectedProject.id && current.durationMs !== durationMs ? { ...current, durationMs } : current));
+      setProjects((items) => items.map((item) => (item.id === selectedProject.id && item.durationMs !== durationMs ? { ...item, durationMs } : item)));
     },
     [selectedProject],
   );
@@ -117,8 +111,16 @@ function WorkspaceContent() {
       );
     }
 
-    return <EditorCanvas activeMode={activeMode} projectId={selectedProject.id} onModeChange={handleModeChange} />;
-  }, [activeMode, error, handleModeChange, loadProjects, loading, selectedProject]);
+    return (
+      <EditorCanvas
+        activeMode={activeMode}
+        projectId={selectedProject.id}
+        storyboardRefreshKey={storyboardRefreshKey}
+        onProjectsChange={loadProjects}
+        onDurationChange={handleDurationChange}
+      />
+    );
+  }, [activeMode, error, handleDurationChange, loadProjects, loading, selectedProject, storyboardRefreshKey]);
 
   return (
     <div className="flex h-screen min-w-[1080px] flex-col overflow-hidden bg-[#f7f9ff] text-[14px]">
@@ -132,7 +134,13 @@ function WorkspaceContent() {
           onSelect={handleSelectProject}
         />
         {content}
-        <AssistantPanel projectId={selectedProject?.id ?? ""} />
+        <AssistantPanel
+          projectId={selectedProject?.id ?? ""}
+          onStoryboardChange={() => {
+            setStoryboardRefreshKey((key) => key + 1);
+            void loadProjects();
+          }}
+        />
       </div>
     </div>
   );

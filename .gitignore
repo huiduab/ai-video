@@ -15,6 +15,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 .codex-next-dev*.log
+.codex-dev-server.log
 
 .DS_Store
 Thumbs.db

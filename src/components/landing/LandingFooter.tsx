@@ -11,7 +11,7 @@ export function LandingFooter() {
           <a href="#contact" className="hover:text-[#1554ff]">联系我们</a>
           <a href="#docs" className="hover:text-[#1554ff]">文档中心</a>
         </nav>
-        <p className="text-[#1554ff]">© 2024 MotionWeave AI. 保留所有权利。</p>
+        <p className="text-[#1554ff]">© 2024 motionweave-ai. 保留所有权利。</p>
       </div>
     </footer>
   );

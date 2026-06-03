@@ -17,6 +17,15 @@ export function isProjectMode(value: unknown): value is ProjectMode {
   return value === "slideshow" || value === "html-animation";
 }
 
+function getProjectThumbnailUrl(metadata: unknown) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const value = (metadata as { coverImageUrl?: unknown }).coverImageUrl;
+  return typeof value === "string" && value ? value : null;
+}
+
 export function mapProject(project: Project) {
   return {
     id: project.id,
@@ -24,7 +33,7 @@ export function mapProject(project: Project) {
     mode: toApiProjectMode(project.mode),
     status: toApiProjectStatus(project.status),
     durationMs: project.durationMs,
-    thumbnailUrl: null,
+    thumbnailUrl: getProjectThumbnailUrl(project.metadata),
     updatedAt: project.updatedAt.toISOString(),
     createdAt: project.createdAt.toISOString(),
   };
@@ -90,4 +99,3 @@ export function formatRelativeTime(value: string) {
     minute: "2-digit",
   });
 }
-

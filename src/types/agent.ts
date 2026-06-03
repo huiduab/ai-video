@@ -72,13 +72,72 @@ export interface VideoScriptScene {
   narration: string;
   visualPrompt: string;
   animationPrompt?: string;
+  playbackEffect?: PlaybackEffect;
   durationMs?: number;
+  generation?: SceneGenerationState;
 }
 
 export interface VideoScriptResult {
   title: string;
   summary: string;
   mode: "slideshow" | "html-animation";
+  styleConsistency?: VideoStyleConsistency;
   transcript: string;
   scenes: VideoScriptScene[];
+}
+
+export interface VideoStyleConsistency {
+  visualStyle: string;
+  colorPalette: string;
+  lighting: string;
+  cameraLanguage: string;
+  renderingRules: string;
+  characterDesign?: string;
+}
+
+export interface PlaybackEffect {
+  imageMotion: {
+    type:
+      | "none"
+      | "slow-zoom-in"
+      | "slow-zoom-out"
+      | "pan-left"
+      | "pan-right"
+      | "pan-up"
+      | "pan-down"
+      | "ken-burns-in-left"
+      | "ken-burns-in-right"
+      | "ken-burns-out-left"
+      | "ken-burns-out-right";
+    durationMs?: number;
+    scaleFrom?: number;
+    scaleTo?: number;
+    translateFrom?: { x: number; y: number };
+    translateTo?: { x: number; y: number };
+  };
+  transition: {
+    type: "cut" | "fade" | "crossfade" | "dip-to-black" | "dip-to-white" | "slide-left" | "slide-right" | "slide-up" | "slide-down" | "zoom-blur";
+    durationMs?: number;
+  };
+  treatment?: {
+    type: "none" | "soft-vignette" | "cinematic-contrast" | "warm-film" | "cool-documentary" | "dreamy-glow" | "subtle-grain";
+    intensity?: number;
+  };
+}
+
+export type SceneAssetStatus = "idle" | "queued" | "generating" | "succeeded" | "failed" | "cancelled";
+
+export interface GeneratedSceneAsset {
+  status: SceneAssetStatus;
+  assetId?: string;
+  url?: string;
+  prompt?: string;
+  error?: string;
+  generatedAt?: string;
+  durationMs?: number;
+}
+
+export interface SceneGenerationState {
+  image?: GeneratedSceneAsset;
+  audio?: GeneratedSceneAsset;
 }

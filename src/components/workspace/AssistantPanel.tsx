@@ -35,13 +35,14 @@ function formatMessageTime(value: string) {
 
 interface AssistantPanelProps {
   projectId: string;
+  onStoryboardChange?: () => void;
 }
 
 type LocalAgentMessage = AgentMessageItem & {
   pending?: boolean;
 };
 
-export function AssistantPanel({ projectId }: AssistantPanelProps) {
+export function AssistantPanel({ projectId, onStoryboardChange }: AssistantPanelProps) {
   const [messages, setMessages] = useState<LocalAgentMessage[]>([]);
   const [scriptEditor, setScriptEditor] = useState<{ messageId: string; script: VideoScriptResult } | null>(null);
   const [input, setInput] = useState("");
@@ -180,6 +181,10 @@ export function AssistantPanel({ projectId }: AssistantPanelProps) {
           return message;
         }),
       );
+
+      if (assistantMessage.intentJson?.payload.generatedScript) {
+        onStoryboardChange?.();
+      }
     } catch (sendError) {
       const message = sendError instanceof Error ? sendError.message : "消息发送失败";
       setError(message);
@@ -302,6 +307,7 @@ export function AssistantPanel({ projectId }: AssistantPanelProps) {
           onSaved={(updated) => {
             setMessages((current) => current.map((message) => (message.id === updated.id ? updated : message)));
             setScriptEditor(null);
+            onStoryboardChange?.();
           }}
         />
       )}
@@ -578,7 +584,7 @@ function ScriptEditorModal({
 }
 
 function formatSceneDuration(durationMs?: number) {
-  const seconds = Math.max(1, Math.round((durationMs ?? 5000) / 1000));
+  const seconds = Math.max(1, Math.round((durationMs ?? 3000) / 1000));
   return `00:${String(seconds).padStart(2, "0")}`;
 }
 
@@ -668,7 +674,7 @@ function ScriptSceneTimeline({
         </div>
         <div className="flex justify-between font-mono text-[11px] text-slate-600">
           <span>00:00</span>
-          <span>{formatSceneDuration(scenes.reduce((sum, scene) => sum + (scene.durationMs ?? 5000), 0))}</span>
+          <span>{formatSceneDuration(scenes.reduce((sum, scene) => sum + (scene.durationMs ?? 3000), 0))}</span>
         </div>
       </div>
 

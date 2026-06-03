@@ -12,7 +12,7 @@ export function Logo({ compact = false, className }: LogoProps) {
       <div className="flex size-8 items-center justify-center rounded-xl bg-[#1554ff] text-white shadow-sm">
         <Orbit size={20} strokeWidth={2.4} />
       </div>
-      {!compact && <span className="text-xl font-semibold tracking-normal text-slate-950">MotionWeave AI</span>}
+      {!compact && <span className="text-xl font-semibold tracking-normal text-slate-950">motionweave-ai</span>}
     </div>
   );
 }

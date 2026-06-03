@@ -16,7 +16,7 @@ export function HeroSection() {
           让视频成片
         </h1>
         <p className="mt-7 max-w-[580px] text-base leading-8 text-slate-700">
-          MotionWeave AI 将创作模式、项目历史和分镜参数写入 PostgreSQL，让每一次创作都可以保存、恢复和扩展。
+          motionweave-ai 将创作模式、项目历史和分镜参数写入 PostgreSQL，让每一次创作都可以保存、恢复和扩展。
         </p>
         <div className="mt-9 flex flex-wrap gap-4">
           <Link href="#modes">
@@ -45,4 +45,3 @@ export function HeroSection() {
     </section>
   );
 }
-

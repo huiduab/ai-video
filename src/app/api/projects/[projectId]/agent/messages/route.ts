@@ -8,6 +8,7 @@ import { parseAgentJson, validateAgentIntent } from "@/lib/agent/intent-validato
 import { buildVideoScriptSystemPrompt } from "@/lib/agent/script-prompt";
 import { validateVideoScript } from "@/lib/agent/script-validator";
 import { prisma } from "@/lib/db";
+import { getScriptDurationMs } from "@/lib/storyboard-playback";
 import type { AgentDisplay, AgentIntentResult, VideoScriptResult } from "@/types/agent";
 
 interface RouteContext {
@@ -63,7 +64,7 @@ function buildScriptRequestContent({
     outputRequirements: {
       transcript: "生成完整逐字稿",
       scenes: "根据逐字稿拆分多个分镜",
-      sceneFields: ["title", "narration", "visualPrompt", mode === "html-animation" ? "animationPrompt" : "durationMs"],
+      sceneFields: ["title", "narration", "visualPrompt", "playbackEffect", mode === "html-animation" ? "animationPrompt" : "durationMs"],
       persistence: "返回 JSON 会被系统保存，字段必须稳定",
     },
   });
@@ -79,6 +80,7 @@ interface AgentMemoryItem {
     narration: string;
     visualPrompt: string;
   }>;
+  styleConsistency?: VideoScriptResult["styleConsistency"];
   payload?: AgentIntentResult["payload"];
 }
 
@@ -105,6 +107,7 @@ async function loadAgentMemory(projectId: string): Promise<AgentMemoryItem[]> {
           kind: "generated-script",
           title: script.title,
           summary: script.summary,
+          styleConsistency: script.styleConsistency,
           scenes: script.scenes.slice(0, 30).map((scene) => ({
             index: scene.index,
             title: scene.title,
@@ -348,6 +351,8 @@ export async function POST(request: Request, context: RouteContext) {
       await prisma.project.update({
         where: { id: projectId },
         data: {
+          title: intent.payload.generatedScript.title,
+          durationMs: getScriptDurationMs(intent.payload.generatedScript),
           metadata: mergeMetadata(project.metadata, {
             activeGeneratedStoryboardMessageId: assistantMessage.id,
           }),
@@ -405,6 +410,13 @@ export async function PATCH(request: Request, context: RouteContext) {
       data: {
         content: nextIntent.assistantReply,
         intentJson: nextIntent as unknown as Prisma.InputJsonValue,
+      },
+    });
+    await prisma.project.update({
+      where: { id: projectId },
+      data: {
+        title: script.title,
+        durationMs: getScriptDurationMs(script),
       },
     });
 
