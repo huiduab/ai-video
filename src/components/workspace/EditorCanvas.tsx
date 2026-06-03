@@ -43,7 +43,9 @@ export function EditorCanvas({ projectId, activeMode, storyboardRefreshKey, onPr
           narration={activeFrame?.narration ?? activeStoryboard?.summary}
           prompt={activeFrame?.prompt}
           imageUrl={activeFrame?.imageUrl}
+          htmlUrl={activeFrame?.htmlUrl}
           imageStatus={activeFrame?.imageStatus}
+          htmlStatus={activeFrame?.htmlStatus}
           currentTime={formatDuration(activeFrame?.startMs ?? 0)}
           totalTime={formatDuration(totalDurationMs)}
           frames={frames}

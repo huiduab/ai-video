@@ -81,4 +81,5 @@ prisma/schema.prisma
 - 涉及 Agent 行为时先读 [docs/AGENT_SYSTEM.md](docs/AGENT_SYSTEM.md) 和 `src/lib/agent/`。
 - 涉及工作区 UI 时先读 [docs/FRONTEND_INDEX.md](docs/FRONTEND_INDEX.md) 和对应组件。
 - 新增重要设计决策时更新最贴近的索引文档；阶段性日志写入 [docs/DEVELOPMENT_LOG.md](docs/DEVELOPMENT_LOG.md)。
+- 清理无关代码、构建缓存或临时文件时，不要删除已经生成的项目素材；尤其不要清理 `public/generated/`、`public/generated/storyboards/` 下的图片、音频、HTML 动画等用户生成文件，除非用户明确要求删除这些生成结果。
 - 文档使用中文、UTF-8、Markdown；路径和命令使用代码格式。

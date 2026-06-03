@@ -8,6 +8,8 @@ import { parseAgentJson, validateAgentIntent } from "@/lib/agent/intent-validato
 import { buildVideoScriptSystemPrompt } from "@/lib/agent/script-prompt";
 import { validateVideoScript } from "@/lib/agent/script-validator";
 import { prisma } from "@/lib/db";
+import { readHtmlAnimationStyleExample } from "@/lib/html-animation-style-examples";
+import { getHtmlAnimationStyleFromMetadata, type AnimationStyle } from "@/lib/html-animation-styles";
 import { getScriptDurationMs } from "@/lib/storyboard-playback";
 import type { AgentDisplay, AgentIntentResult, VideoScriptResult } from "@/types/agent";
 
@@ -45,17 +47,28 @@ function buildScriptRequestContent({
   projectTitle,
   intent,
   memory,
+  htmlAnimationStyle,
 }: {
   userPrompt: string;
   mode: VideoScriptResult["mode"];
   projectTitle: string;
   intent: AgentIntentResult;
   memory: AgentMemoryItem[];
+  htmlAnimationStyle: AnimationStyle;
 }) {
   return JSON.stringify({
     userPrompt,
     projectTitle,
     mode,
+    htmlAnimationStyle:
+      mode === "html-animation"
+        ? {
+            id: htmlAnimationStyle.id,
+            name: htmlAnimationStyle.name,
+            description: htmlAnimationStyle.description,
+            prompt: htmlAnimationStyle.prompt,
+          }
+        : null,
     memory,
     intentAnalysis: {
       type: intent.type,
@@ -64,10 +77,40 @@ function buildScriptRequestContent({
     outputRequirements: {
       transcript: "生成完整逐字稿",
       scenes: "根据逐字稿拆分多个分镜",
-      sceneFields: ["title", "narration", "visualPrompt", "playbackEffect", mode === "html-animation" ? "animationPrompt" : "durationMs"],
+      sceneFields:
+        mode === "html-animation"
+          ? ["title", "narration", "visualPrompt", "animationPrompt", "durationMs"]
+          : ["title", "narration", "visualPrompt", "playbackEffect", "durationMs"],
       persistence: "返回 JSON 会被系统保存，字段必须稳定",
     },
   });
+}
+
+function buildHtmlAnimationStyleMessages(style: AnimationStyle, exampleHtml: string) {
+  return [
+    {
+      role: "user" as const,
+      content: JSON.stringify({
+        messageType: "html-animation-style-rule",
+        instruction: "后续 HTML 动画脚本生成必须优先遵循这个风格提示词。",
+        style: {
+          id: style.id,
+          name: style.name,
+          description: style.description,
+          prompt: style.prompt,
+        },
+      }),
+    },
+    {
+      role: "user" as const,
+      content: JSON.stringify({
+        messageType: "html-animation-style-example",
+        instruction: "这是当前风格对应的示例 HTML。只参考视觉语言、CSS 技法、DOM 组织和动效节奏，不要照抄示例文本内容。",
+        styleId: style.id,
+        exampleHtml,
+      }),
+    },
+  ];
 }
 
 interface AgentMemoryItem {
@@ -79,6 +122,7 @@ interface AgentMemoryItem {
     title: string;
     narration: string;
     visualPrompt: string;
+    animationPrompt?: string;
   }>;
   styleConsistency?: VideoScriptResult["styleConsistency"];
   payload?: AgentIntentResult["payload"];
@@ -113,6 +157,7 @@ async function loadAgentMemory(projectId: string): Promise<AgentMemoryItem[]> {
             title: scene.title,
             narration: scene.narration,
             visualPrompt: scene.visualPrompt,
+            animationPrompt: scene.animationPrompt,
           })),
         });
         continue;
@@ -139,17 +184,31 @@ async function generateVideoScript({
   mode,
   intent,
   memory,
+  htmlAnimationStyle,
 }: {
   userPrompt: string;
   projectTitle: string;
   mode: VideoScriptResult["mode"];
   intent: AgentIntentResult;
   memory: AgentMemoryItem[];
+  htmlAnimationStyle: AnimationStyle;
 }) {
+  const htmlAnimationStyleExample = mode === "html-animation" ? await readHtmlAnimationStyleExample(htmlAnimationStyle) : "";
   const raw =
     (await callIntentModel([
       { role: "system", content: buildVideoScriptSystemPrompt(mode) },
-      { role: "user", content: buildScriptRequestContent({ userPrompt, projectTitle, mode, intent, memory }) },
+      ...(mode === "html-animation" ? buildHtmlAnimationStyleMessages(htmlAnimationStyle, htmlAnimationStyleExample) : []),
+      {
+        role: "user",
+        content: buildScriptRequestContent({
+          userPrompt,
+          projectTitle,
+          mode,
+          intent,
+          memory,
+          htmlAnimationStyle,
+        }),
+      },
     ])) ?? "";
 
   try {
@@ -216,6 +275,7 @@ export async function POST(request: Request, context: RouteContext) {
       narration: scene.narration,
     }));
     const memory = await loadAgentMemory(projectId);
+    const htmlAnimationStyle = getHtmlAnimationStyleFromMetadata(project.metadata);
 
     let raw = "";
 
@@ -299,6 +359,7 @@ export async function POST(request: Request, context: RouteContext) {
           mode: toApiMode(project.mode),
           intent,
           memory,
+          htmlAnimationStyle,
         });
 
         intent = {

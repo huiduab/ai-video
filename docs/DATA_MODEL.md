@@ -79,6 +79,14 @@
 - `durationMs` 在 TTS 服务返回可用时保存音频时长。
 - `metadata` 保存 `provider: "ai-tts"`、`model`、`voice`、`responseFormat`、分镜文本和 TTS 原始响应排查信息。
 
+HTML 动画分镜生成成功后：
+
+- `type` 使用 `HTML`。
+- `url` 保存本地可访问路径，例如 `/generated/storyboards/{projectId}/scene-1-animation-...html`。
+- `storageKey` 保存本地文件路径，例如 `public/generated/storyboards/{projectId}/scene-1-animation-...html`。
+- `durationMs` 保存对应分镜建议时长。
+- `metadata` 保存 `provider: "ai-html-animation"`、`model`、`messageId`、`sceneIndex`、动画提示词和本地文件名。
+
 ### `GenerationTask`
 
 映射表：`generation_tasks`
@@ -133,6 +141,7 @@ VideoScriptResult
 - `durationMs`
 - `playbackEffect`：图片轮播播放配置，包含 `imageMotion`、`transition` 和可选 `treatment`；脚本校验器会规范化非法值。
 - `generation.image`：分镜画面生成状态，包含 `status`、`assetId`、`url`、`prompt`、`generatedAt`。
+- `generation.html`：HTML 动画模式的本地网页动画状态，包含 `status`、`assetId`、`url`、`prompt`、`generatedAt`、`durationMs` 和 `code`；后端在局部重生成时会把前后已生成分镜的 `code` 作为上下文传给模型。
 - `generation.audio`：旁白音频生成状态，保存 `status`、`assetId`、`url`、`prompt`、`generatedAt`、`durationMs`；当声音完成后，前端使用 `audio.durationMs` 作为对应分镜时长，没有声音时默认 3000ms。
 - `styleConsistency`：生成脚本级别的画风一致性约束，包含统一视觉风格、色彩、光线、镜头语言、角色或主体设计和渲染规则。生图接口会将其写入最终 prompt，减少跨分镜画风漂移。
 

@@ -10,6 +10,7 @@ export interface TimelineItem {
   duration: string;
   thumbnailClass: string;
   thumbnailUrl?: string | null;
+  htmlUrl?: string | null;
   statusLabel?: string;
   isGenerating?: boolean;
   badge?: ReactNode;
@@ -114,6 +115,15 @@ export function TimelinePanel({
                 {item.thumbnailUrl && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={item.thumbnailUrl} alt={`${item.title} 画面`} className="absolute inset-0 size-full object-cover" />
+                )}
+                {item.htmlUrl && (
+                  <iframe
+                    title={`${item.title} HTML 动画缩略图`}
+                    src={item.htmlUrl}
+                    sandbox="allow-scripts"
+                    scrolling="no"
+                    className="pointer-events-none absolute inset-0 size-full border-0"
+                  />
                 )}
                 {item.statusLabel && (
                   <span className="absolute left-1.5 top-1.5 rounded bg-white/85 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">

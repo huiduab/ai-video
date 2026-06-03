@@ -3,6 +3,8 @@ node_modules/
 out/
 dist/
 build/
+coverage/
+.turbo/
 
 .env
 .env.local
@@ -15,7 +17,14 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 .codex-next-dev*.log
+.next-dev*.log
 .codex-dev-server.log
+*.tsbuildinfo
+
+tmp/
+*.zip
+
+public/generated/
 
 .DS_Store
 Thumbs.db

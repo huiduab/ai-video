@@ -17,7 +17,9 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
+import { ANIMATION_STYLES, getHtmlAnimationStyle, getDefaultHtmlAnimationStyle, type AnimationStyle } from "@/lib/html-animation-styles";
 import type { AgentDisplay, AgentMessageItem, VideoScriptResult, VideoScriptScene } from "@/types/agent";
+import type { ProjectItem } from "@/types/project";
 
 const MIN_WIDTH = 280;
 const MAX_WIDTH = 520;
@@ -50,6 +52,9 @@ export function AssistantPanel({ projectId, onStoryboardChange }: AssistantPanel
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [stylePickerOpen, setStylePickerOpen] = useState(false);
+  const [selectedStyle, setSelectedStyle] = useState<AnimationStyle>(getDefaultHtmlAnimationStyle());
+  const [styleSaving, setStyleSaving] = useState(false);
   const resizeStart = useRef<{ x: number; width: number } | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
 
@@ -81,6 +86,37 @@ export function AssistantPanel({ projectId, onStoryboardChange }: AssistantPanel
   useEffect(() => {
     void loadMessages();
   }, [loadMessages]);
+
+  useEffect(() => {
+    if (!projectId) {
+      setSelectedStyle(getDefaultHtmlAnimationStyle());
+      setStylePickerOpen(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadProjectStyle() {
+      try {
+        const response = await fetch(`/api/projects/${projectId}`, { cache: "no-store" });
+        const payload = (await response.json().catch(() => ({}))) as { project?: ProjectItem; error?: string };
+
+        if (!cancelled && response.ok && payload.project) {
+          setSelectedStyle(getHtmlAnimationStyle(payload.project.htmlAnimationStyleId));
+        }
+      } catch {
+        if (!cancelled) {
+          setSelectedStyle(getDefaultHtmlAnimationStyle());
+        }
+      }
+    }
+
+    void loadProjectStyle();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
@@ -209,6 +245,35 @@ export function AssistantPanel({ projectId, onStoryboardChange }: AssistantPanel
     }
   }
 
+  async function selectHtmlAnimationStyle(style: AnimationStyle) {
+    if (!projectId || styleSaving) {
+      return;
+    }
+
+    setSelectedStyle(style);
+    setStyleSaving(true);
+    setError("");
+
+    try {
+      const response = await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ htmlAnimationStyleId: style.id }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "风格保存失败");
+      }
+
+      setStylePickerOpen(false);
+    } catch (styleError) {
+      setError(styleError instanceof Error ? styleError.message : "风格保存失败");
+    } finally {
+      setStyleSaving(false);
+    }
+  }
+
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -277,12 +342,16 @@ export function AssistantPanel({ projectId, onStoryboardChange }: AssistantPanel
             disabled={!projectId || sending}
           />
           <div className="mt-2 flex items-center gap-3">
-            <span className="text-sm text-slate-600">{input.length}/1000</span>
-            <button type="button" aria-label="AI 指令" className="text-slate-700 hover:text-[#1554ff]">
-              <Sparkles size={20} />
-            </button>
-            <button type="button" aria-label="添加图片" className="text-slate-700 hover:text-[#1554ff]">
-              <Image size={20} />
+            <button
+              type="button"
+              aria-label="添加 HTML 动画风格"
+              aria-expanded={stylePickerOpen}
+              onClick={() => setStylePickerOpen((open) => !open)}
+              disabled={!projectId || styleSaving}
+              title={`HTML 动画风格：${selectedStyle.name}`}
+              className="flex size-9 shrink-0 items-center justify-center text-emerald-600 transition hover:text-emerald-700 disabled:cursor-not-allowed disabled:text-slate-300"
+            >
+              <WandSparkles size={20} />
             </button>
             <button
               type="button"
@@ -298,6 +367,15 @@ export function AssistantPanel({ projectId, onStoryboardChange }: AssistantPanel
         <p className="mt-3 text-center text-xs text-slate-500">AI 生成内容仅供参考，请注意核查信息的准确性。</p>
       </div>
 
+      {stylePickerOpen && (
+        <StylePickerCard
+          selectedStyleId={selectedStyle.id}
+          saving={styleSaving}
+          onSelect={(style) => void selectHtmlAnimationStyle(style)}
+          onClose={() => setStylePickerOpen(false)}
+        />
+      )}
+
       {scriptEditor && (
         <ScriptEditorModal
           projectId={projectId}
@@ -312,6 +390,83 @@ export function AssistantPanel({ projectId, onStoryboardChange }: AssistantPanel
         />
       )}
     </aside>
+  );
+}
+
+function StylePickerCard({
+  selectedStyleId,
+  saving,
+  onSelect,
+  onClose,
+}: {
+  selectedStyleId: string;
+  saving: boolean;
+  onSelect: (style: AnimationStyle) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/42 p-5">
+      <div className="flex max-h-[86vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+        <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
+          <div>
+            <h3 className="text-xl font-semibold text-slate-950">HTML 动画风格</h3>
+            <p className="mt-1 text-sm text-slate-500">选择一个风格后会自动保存，并应用到当前项目后续 HTML 动画生成。</p>
+          </div>
+          <button type="button" aria-label="关闭风格选择" onClick={onClose} className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-950">
+            <X size={20} />
+          </button>
+        </div>
+        <div className="min-h-0 overflow-y-auto p-6">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            {ANIMATION_STYLES.map((style) => {
+              const selected = style.id === selectedStyleId;
+
+              return (
+                <button
+                  key={style.id}
+                  type="button"
+                  onClick={() => onSelect(style)}
+                  disabled={saving}
+                  className={cn(
+                    "grid min-h-[230px] grid-cols-[220px_minmax(0,1fr)] gap-4 rounded-xl border p-4 text-left transition disabled:cursor-wait",
+                    selected ? "border-emerald-500 bg-emerald-50 shadow-[0_0_0_2px_rgba(16,185,129,0.16)]" : "border-slate-200 bg-white hover:border-emerald-300",
+                  )}
+                >
+                  <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-950">
+                    <iframe
+                      title={`${style.name} 示例`}
+                      src={style.exampleUrl}
+                      sandbox="allow-scripts"
+                      scrolling="no"
+                      className="pointer-events-none absolute inset-0 size-full border-0"
+                    />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-base font-semibold text-slate-950">{style.name}</p>
+                        <p className="mt-1 text-sm leading-5 text-slate-600">{style.description}</p>
+                      </div>
+                      {selected && <span className="shrink-0 rounded-full bg-emerald-600 px-2 py-1 text-xs font-medium text-white">已选</span>}
+                    </div>
+                    <div className="mt-3 rounded-lg bg-slate-50 p-3">
+                      <p className="text-xs font-medium text-slate-500">提示词</p>
+                      <p className="mt-1 line-clamp-6 text-xs leading-5 text-slate-700">{style.prompt}</p>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div className="flex items-center justify-between border-t border-slate-200 px-6 py-4 text-sm text-slate-500">
+          <span>共 {ANIMATION_STYLES.length} 个风格</span>
+          <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700">
+            取消
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

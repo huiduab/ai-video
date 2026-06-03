@@ -92,7 +92,7 @@ Project.metadata.activeGeneratedStoryboardMessageId
 
 ### `POST /api/projects/[projectId]/agent/storyboards/assets`
 
-按分镜生成并保存素材状态。支持 `kind: "image"` 和 `kind: "audio"`；重新生成时可传入 `force: true`，成功后会用新的本地文件路径替换对应分镜的 `generation.image` 或 `generation.audio`。
+按分镜生成并保存素材状态。支持 `kind: "image"`、`kind: "html"` 和 `kind: "audio"`；重新生成时可传入 `force: true`，成功后会用新的本地文件路径替换对应分镜的 `generation.image`、`generation.html` 或 `generation.audio`。
 
 请求体：
 
@@ -107,7 +107,7 @@ Project.metadata.activeGeneratedStoryboardMessageId
 处理流程：
 
 1. 校验目标 Agent 消息必须属于当前项目且包含 `generatedScript`。
-2. 跳过已经 `succeeded` 且有 URL 的分镜画面，保证再次点击 AI 生成时从未生成分镜继续。
+2. 跳过已经 `succeeded` 且有可访问本地 URL 的分镜画面；如果历史 JSON 指向的 `/generated/...` 文件已不存在，则不会跳过，会重新生成。
 3. 使用 Evolink `POST /v1/images/generations` 创建异步生图任务，默认模型为 `z-image-turbo`。
 4. 按 `EVOLINK_IMAGE_POLL_INTERVAL_MS` 轮询 `GET /v1/tasks/{task_id}`，最长等待 `EVOLINK_IMAGE_POLL_TIMEOUT_MS`。
 5. 任务完成后下载 `results[0]` 到 `public/generated/storyboards/{projectId}/`，避免 Evolink 临时链接过期。
@@ -115,6 +115,16 @@ Project.metadata.activeGeneratedStoryboardMessageId
 7. `generation_tasks.input/output` 保存请求参数、Evolink task id、远端结果、本地文件信息等排查数据。
 8. 将图片状态写回 `agent_messages.intentJson.payload.generatedScript.scenes[].generation.image`。
 9. 前端图片生成成功后会继续用 `kind: "audio"` 生成旁白音频。
+
+HTML 动画处理流程：
+
+1. 仅 `generatedScript.mode === "html-animation"` 时允许生成。
+2. 使用 `AI_BASE_URL`、`AI_API_KEY` 和 `AI_HTML_ANIMATION_MODEL ?? AI_MODEL` 调用 OpenAI 兼容 `/chat/completions`。
+3. 请求中包含统一 `styleConsistency`、当前分镜 `animationPrompt`、前一个已生成 HTML 代码 `previousSceneHtml` 和后一个已生成 HTML 代码 `nextSceneHtml`；后两个字段没有可用代码时为 `null`。
+4. 模型必须返回 `{ "html": "<!doctype html>..." }`，HTML 需为不依赖外部网络资源的单文件 16:9 网页动画。
+5. HTML 保存到 `public/generated/storyboards/{projectId}/`，并创建 `AssetType.HTML` 素材记录。
+6. 将结果写回 `agent_messages.intentJson.payload.generatedScript.scenes[].generation.html`，包含 `url`、`assetId`、`prompt`、`durationMs` 和 `code`。
+7. 前端 HTML 动画生成成功后继续用 `kind: "audio"` 生成旁白音频。
 
 音频处理流程：
 
@@ -124,6 +134,7 @@ Project.metadata.activeGeneratedStoryboardMessageId
 4. 接口兼容二进制音频响应，以及返回 `audio.url` / `output.audio.url` / base64 音频数据的 JSON 响应。
 5. 音频保存到 `public/generated/storyboards/{projectId}/`，并创建 `assets` 音频记录。
 6. 将音频状态写回 `agent_messages.intentJson.payload.generatedScript.scenes[].generation.audio`，前端会用 `audio.url` 播放，用 `audio.durationMs` 覆盖分镜时长。
+7. 后端会校验 TTS 返回内容必须是可用音频：本地音频文件至少 128 bytes，响应应为 `audio/*` 或具备常见音频魔数；类似 `ok` 的文本响应不会保存为成功音频，会写入失败状态并继续尝试下一个 TTS 路径。
 
 ## 错误策略
 

@@ -9,4 +9,5 @@ export interface ProjectItem {
   updatedAt: string;
   durationMs: number;
   thumbnailUrl: string | null;
+  htmlAnimationStyleId?: string;
 }

@@ -11,7 +11,72 @@ const allowedTypes: AgentIntentType[] = [
 
 export function parseAgentJson(raw: string): unknown {
   const cleaned = raw.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```$/i, "");
-  return JSON.parse(cleaned);
+
+  try {
+    return JSON.parse(cleaned);
+  } catch (error) {
+    const extracted = extractFirstJsonValue(cleaned);
+
+    if (extracted) {
+      return JSON.parse(extracted);
+    }
+
+    throw error;
+  }
+}
+
+function extractFirstJsonValue(value: string) {
+  const start = value.search(/[\[{]/);
+
+  if (start < 0) {
+    return "";
+  }
+
+  const opener = value[start];
+  const closer = opener === "{" ? "}" : "]";
+  const stack = [closer];
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start + 1; index < value.length; index += 1) {
+    const char = value[index];
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      escaped = inString;
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) {
+      continue;
+    }
+
+    if (char === "{" || char === "[") {
+      stack.push(char === "{" ? "}" : "]");
+      continue;
+    }
+
+    if (char === "}" || char === "]") {
+      if (stack.pop() !== char) {
+        return "";
+      }
+
+      if (stack.length === 0) {
+        return value.slice(start, index + 1);
+      }
+    }
+  }
+
+  return "";
 }
 
 export function validateAgentIntent(value: unknown): AgentIntentResult {

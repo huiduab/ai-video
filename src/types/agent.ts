@@ -139,5 +139,8 @@ export interface GeneratedSceneAsset {
 
 export interface SceneGenerationState {
   image?: GeneratedSceneAsset;
+  html?: GeneratedSceneAsset & {
+    code?: string;
+  };
   audio?: GeneratedSceneAsset;
 }

@@ -1,4 +1,5 @@
 import { ProjectMode as DbProjectMode, ProjectStatus as DbProjectStatus, type Project, type ProjectSetting, type StoryboardScene } from "@prisma/client";
+import { DEFAULT_HTML_ANIMATION_STYLE_ID, getHtmlAnimationStyle } from "@/lib/html-animation-styles";
 import type { ProjectMode, ProjectStatus } from "@/types/project";
 
 export function toDbProjectMode(mode: ProjectMode): DbProjectMode {
@@ -26,6 +27,14 @@ function getProjectThumbnailUrl(metadata: unknown) {
   return typeof value === "string" && value ? value : null;
 }
 
+function getProjectHtmlAnimationStyleId(metadata: unknown) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return DEFAULT_HTML_ANIMATION_STYLE_ID;
+  }
+
+  return getHtmlAnimationStyle((metadata as { htmlAnimationStyleId?: unknown }).htmlAnimationStyleId).id;
+}
+
 export function mapProject(project: Project) {
   return {
     id: project.id,
@@ -34,6 +43,7 @@ export function mapProject(project: Project) {
     status: toApiProjectStatus(project.status),
     durationMs: project.durationMs,
     thumbnailUrl: getProjectThumbnailUrl(project.metadata),
+    htmlAnimationStyleId: getProjectHtmlAnimationStyleId(project.metadata),
     updatedAt: project.updatedAt.toISOString(),
     createdAt: project.createdAt.toISOString(),
   };

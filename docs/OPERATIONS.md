@@ -14,6 +14,7 @@ NEXT_PUBLIC_APP_URL="http://localhost:3000"
 AI_BASE_URL="https://your-provider.example.com/v1"
 AI_API_KEY="your_api_key"
 AI_MODEL="gemini-3-flash-preview"
+AI_HTML_ANIMATION_MODEL="gemini-3-flash-preview"
 AI_TTS_MODEL="qwen3-tts-flash"
 AI_TTS_VOICE="Li"
 AI_TTS_RESPONSE_FORMAT="mp3"
@@ -38,6 +39,10 @@ npm run build
 npm run db:push
 npm run db:generate
 ```
+
+## Git 忽略规则
+
+`.gitignore` 会忽略本地 dev 日志、构建缓存、临时探测目录、上传压缩包和 `public/generated/` 下的运行时生成素材，避免这些实时产物被误传到 GitHub。需要提交的静态示例资产应放在明确的项目目录中，例如 `public/html-animation-styles/`。
 
 ## 本地启动
 
@@ -105,6 +110,7 @@ npm run build
 检查：
 
 - `AI_BASE_URL` 和 `AI_API_KEY` 是否可用于当前 AI 服务。
+- HTML 动画生成默认使用 `AI_HTML_ANIMATION_MODEL ?? AI_MODEL`，生成成功后的 HTML 会保存到 `public/generated/storyboards/{projectId}/`，并写入 `generation.html.url`。
 - `AI_TTS_MODEL` 默认使用 `qwen3-tts-flash`。
 - `AI_TTS_VOICE` 默认使用中文音色 `Li`，可按服务支持的音色名称调整。
 - 默认会尝试 `/audio/speech` 和 `/tts` 两种 TTS 路径；如果服务只支持固定路径，设置 `AI_TTS_PATH`。
@@ -124,3 +130,9 @@ npm run build
 ### 构建失败但代码看似正确
 
 可清理 `.next` 后重试。不要删除用户未确认的源码改动。
+
+清理标准：
+
+- 可以清理 `.next` 这类构建缓存。
+- 不要删除 `public/generated/`、`public/generated/storyboards/` 下的图片、音频、HTML 动画等已生成项目素材。
+- 只有用户明确要求删除生成结果时，才可以清理这些生成文件。

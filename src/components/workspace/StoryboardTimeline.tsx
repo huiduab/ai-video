@@ -6,6 +6,7 @@ import { Button } from "@/components/common/Button";
 import { TimelinePanel, type TimelineItem } from "@/components/workspace/TimelinePanel";
 import { formatDuration, formatRelativeTime } from "@/lib/project-mappers";
 import { getSceneDurationMs, normalizePlaybackEffect } from "@/lib/storyboard-playback";
+import type { SceneAssetStatus } from "@/types/agent";
 import type { ProjectMode } from "@/types/project";
 import type { GeneratedStoryboardOption, StoryboardFrame } from "@/types/storyboard";
 
@@ -73,6 +74,108 @@ async function readAudioDurationMs(url: string) {
   }
 }
 
+async function generatedUrlReachable(url: string | undefined) {
+  if (!url) {
+    return false;
+  }
+
+  if (url.startsWith("data:")) {
+    return true;
+  }
+
+  try {
+    const response = await fetch(url, { method: "HEAD", cache: "no-store" });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+function getAssetStatusLabel(status: SceneAssetStatus | undefined, generating: boolean) {
+  if (status === "succeeded") {
+    return "已生成";
+  }
+
+  if (status === "failed") {
+    return "生成失败";
+  }
+
+  if (generating) {
+    return "待生成";
+  }
+
+  return "未生成";
+}
+
+function getFrameVisualStatusLabel(frame: StoryboardFrame, mode: ProjectMode, generating: boolean) {
+  return getAssetStatusLabel(mode === "html-animation" ? frame.htmlStatus : frame.imageStatus, generating);
+}
+
+async function markMissingGeneratedAssets(storyboards: GeneratedStoryboardOption[]) {
+  return Promise.all(
+    storyboards.map(async (storyboard) => {
+      const scenes = await Promise.all(
+        storyboard.script.scenes.map(async (scene) => {
+          const image = scene.generation?.image;
+          const html = scene.generation?.html;
+          const audio = scene.generation?.audio;
+          const [imageOk, htmlOk, audioOk] = await Promise.all([
+            image?.status === "succeeded" && image.url ? generatedUrlReachable(image.url) : Promise.resolve(true),
+            html?.status === "succeeded" && html.url ? generatedUrlReachable(html.url) : Promise.resolve(true),
+            audio?.status === "succeeded" && audio.url ? generatedUrlReachable(audio.url) : Promise.resolve(true),
+          ]);
+
+          if (imageOk && htmlOk && audioOk) {
+            return scene;
+          }
+
+          return {
+            ...scene,
+            generation: {
+              ...scene.generation,
+              image:
+                image && !imageOk
+                  ? {
+                      ...image,
+                      status: "failed" as const,
+                      url: undefined,
+                      error: "本地图片文件不存在，请重新生成",
+                    }
+                  : image,
+              html:
+                html && !htmlOk
+                  ? {
+                      ...html,
+                      status: "failed" as const,
+                      url: undefined,
+                      error: "本地 HTML 文件不存在，请重新生成",
+                    }
+                  : html,
+              audio:
+                audio && !audioOk
+                  ? {
+                      ...audio,
+                      status: "failed" as const,
+                      url: undefined,
+                      error: "本地音频文件不存在，请重新生成",
+                    }
+                  : audio,
+            },
+          };
+        }),
+      );
+
+      return {
+        ...storyboard,
+        script: {
+          ...storyboard.script,
+          scenes,
+        },
+      };
+    }),
+  );
+}
+
 function getFramesTotalDurationMs(frames: StoryboardFrame[]) {
   const lastFrame = frames[frames.length - 1];
   return lastFrame ? lastFrame.startMs + lastFrame.durationMs : 0;
@@ -83,9 +186,11 @@ function sceneToFrame(
   startMs: number,
   audioDurationByUrl: Record<string, number>,
   holdAfterMs: number,
+  mode: ProjectMode,
 ): StoryboardFrame {
   const audioUrl = scene.generation?.audio?.url;
   const durationMs = audioUrl ? audioDurationByUrl[audioUrl] ?? getSceneDurationMs(scene) : getSceneDurationMs(scene);
+  const isHtmlAnimation = mode === "html-animation";
 
   return {
     id: `generated-scene-${scene.index}`,
@@ -94,12 +199,14 @@ function sceneToFrame(
     startMs,
     durationMs,
     holdAfterMs,
-    thumbnailUrl: scene.generation?.image?.url ?? null,
+    thumbnailUrl: isHtmlAnimation ? null : scene.generation?.image?.url ?? null,
     imageUrl: scene.generation?.image?.url,
+    htmlUrl: scene.generation?.html?.url,
     audioUrl,
     imageStatus: scene.generation?.image?.status ?? "idle",
+    htmlStatus: scene.generation?.html?.status ?? "idle",
     audioStatus: scene.generation?.audio?.status ?? "idle",
-    prompt: scene.visualPrompt,
+    prompt: isHtmlAnimation ? scene.animationPrompt ?? scene.visualPrompt : scene.visualPrompt,
     narration: scene.narration,
     playbackEffect: normalizePlaybackEffect(scene.playbackEffect),
     visualConfig: {
@@ -115,7 +222,7 @@ function sceneToFrame(
   };
 }
 
-function storyboardToFrames(storyboard: GeneratedStoryboardOption | null, audioDurationByUrl: Record<string, number>): StoryboardFrame[] {
+function storyboardToFrames(storyboard: GeneratedStoryboardOption | null, audioDurationByUrl: Record<string, number>, mode: ProjectMode): StoryboardFrame[] {
   if (!storyboard) {
     return [];
   }
@@ -124,7 +231,7 @@ function storyboardToFrames(storyboard: GeneratedStoryboardOption | null, audioD
 
   return storyboard.script.scenes.map((scene, index) => {
     const holdAfterMs = index < storyboard.script.scenes.length - 1 ? sceneBreathGapMs : 0;
-    const frame = sceneToFrame(scene, startMs, audioDurationByUrl, holdAfterMs);
+    const frame = sceneToFrame(scene, startMs, audioDurationByUrl, holdAfterMs, mode);
     startMs += frame.durationMs + holdAfterMs;
     return frame;
   });
@@ -139,6 +246,7 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
   const [error, setError] = useState("");
   const [generating, setGenerating] = useState(false);
   const [generatingSceneIndex, setGeneratingSceneIndex] = useState<number | null>(null);
+  const [generatingAssetKind, setGeneratingAssetKind] = useState<"image" | "html" | "audio" | null>(null);
   const [generationStatus, setGenerationStatus] = useState("");
   const [detailOpen, setDetailOpen] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -148,9 +256,9 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
     () => storyboards.find((storyboard) => storyboard.messageId === activeMessageId) ?? storyboards[0] ?? null,
     [activeMessageId, storyboards],
   );
-  const frames = useMemo(() => storyboardToFrames(activeStoryboard, audioDurationByUrl), [activeStoryboard, audioDurationByUrl]);
+  const frames = useMemo(() => storyboardToFrames(activeStoryboard, audioDurationByUrl, mode), [activeStoryboard, audioDurationByUrl, mode]);
   const selectedFrame = frames.find((frame) => frame.id === selectedId) ?? frames[0] ?? null;
-  const generatedCount = frames.filter((frame) => frame.imageStatus === "succeeded").length;
+  const generatedCount = frames.filter((frame) => (mode === "html-animation" ? frame.htmlStatus === "succeeded" && frame.htmlUrl : frame.imageStatus === "succeeded")).length;
   const audioGeneratedCount = frames.filter((frame) => frame.audioStatus === "succeeded" && frame.audioUrl).length;
 
   const loadGeneratedStoryboards = useCallback(async () => {
@@ -169,7 +277,7 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
         throw new Error(payload.error ?? "生成分镜加载失败");
       }
 
-      setStoryboards(payload.items);
+      setStoryboards(await markMissingGeneratedAssets(payload.items));
       setActiveMessageId(payload.activeMessageId ?? payload.items[0]?.messageId ?? "");
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "生成分镜加载失败");
@@ -284,6 +392,39 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
     );
   }
 
+  function patchSceneGenerationState(
+    sceneIndex: number,
+    patch: NonNullable<GeneratedStoryboardOption["script"]["scenes"][number]["generation"]>,
+  ) {
+    if (!activeStoryboard) {
+      return;
+    }
+
+    setStoryboards((current) =>
+      current.map((storyboard) =>
+        storyboard.messageId === activeStoryboard.messageId
+          ? {
+              ...storyboard,
+              script: {
+                ...storyboard.script,
+                scenes: storyboard.script.scenes.map((item) =>
+                  item.index === sceneIndex
+                    ? {
+                        ...item,
+                        generation: {
+                          ...item.generation,
+                          ...patch,
+                        },
+                      }
+                    : item,
+                ),
+              },
+            }
+          : storyboard,
+      ),
+    );
+  }
+
   function handlePlayAudio(url: string) {
     audioRef.current?.pause();
     const audio = new Audio(url);
@@ -298,12 +439,19 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
       return;
     }
 
-    const pendingScenes = activeStoryboard.script.scenes.filter(
-      (scene) => scene.generation?.image?.status !== "succeeded" || scene.generation?.audio?.status !== "succeeded",
-    );
+    let latestScenes = activeStoryboard.script.scenes;
+    const visualPendingScenes = latestScenes.filter((scene) => {
+      const visualSucceeded =
+        mode === "html-animation"
+          ? scene.generation?.html?.status === "succeeded" && Boolean(scene.generation.html.url)
+          : scene.generation?.image?.status === "succeeded" && Boolean(scene.generation.image.url);
 
-    if (pendingScenes.length === 0) {
-      setGenerationStatus("所有分镜画面和旁白已生成");
+      return !visualSucceeded;
+    });
+    const hasPendingAudio = latestScenes.some((scene) => !(scene.generation?.audio?.status === "succeeded" && Boolean(scene.generation.audio.url)));
+
+    if (visualPendingScenes.length === 0 && !hasPendingAudio) {
+      setGenerationStatus(mode === "html-animation" ? "所有 HTML 动画和旁白已生成" : "所有分镜画面和旁白已生成");
       return;
     }
 
@@ -314,83 +462,145 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
     setError("");
 
     try {
-      for (const scene of pendingScenes) {
+      for (const scene of visualPendingScenes) {
         if (controller.signal.aborted) {
           break;
         }
 
-        let currentScene = scene;
+        const currentScene = latestScenes.find((item) => item.index === scene.index) ?? scene;
+        setGenerationStatus(mode === "html-animation" ? `正在生成第 ${scene.index} 个 HTML 动画` : `正在生成第 ${scene.index} 个分镜画面`);
+        setGeneratingSceneIndex(scene.index);
+        setGeneratingAssetKind(mode === "html-animation" ? "html" : "image");
+        patchSceneGenerationState(
+          scene.index,
+          mode === "html-animation"
+            ? {
+                html: {
+                  ...currentScene.generation?.html,
+                  status: "generating",
+                  prompt: currentScene.animationPrompt ?? currentScene.visualPrompt,
+                },
+              }
+            : {
+                image: {
+                  ...currentScene.generation?.image,
+                  status: "generating",
+                  prompt: currentScene.visualPrompt,
+                },
+              },
+        );
+        const response = await fetch(`/api/projects/${projectId}/agent/storyboards/assets`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messageId: activeStoryboard.messageId,
+            sceneIndex: scene.index,
+            kind: mode === "html-animation" ? "html" : "image",
+          }),
+          signal: controller.signal,
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          scene?: GeneratedStoryboardOption["script"]["scenes"][number];
+          error?: string;
+        };
 
-        if (currentScene.generation?.image?.status !== "succeeded") {
-          setGenerationStatus(`正在生成第 ${scene.index} 个分镜画面`);
-          setGeneratingSceneIndex(scene.index);
-          const response = await fetch(`/api/projects/${projectId}/agent/storyboards/assets`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              messageId: activeStoryboard.messageId,
-              sceneIndex: scene.index,
-              kind: "image",
-            }),
-            signal: controller.signal,
-          });
-          const payload = (await response.json().catch(() => ({}))) as {
-            scene?: GeneratedStoryboardOption["script"]["scenes"][number];
-            error?: string;
-          };
-
-          if (!response.ok || !payload.scene) {
-            throw new Error(payload.error ?? "分镜画面生成失败");
-          }
-
-          currentScene = payload.scene;
-          patchSceneInActiveStoryboard(payload.scene);
+        if (!response.ok || !payload.scene) {
+          throw new Error(payload.error ?? (mode === "html-animation" ? "HTML 动画生成失败" : "分镜画面生成失败"));
         }
 
-        if (controller.signal.aborted) {
-          break;
-        }
-
-        if (currentScene.generation?.audio?.status !== "succeeded") {
-          setGenerationStatus(`正在生成第 ${scene.index} 个分镜旁白`);
-          setGeneratingSceneIndex(scene.index);
-          const response = await fetch(`/api/projects/${projectId}/agent/storyboards/assets`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              messageId: activeStoryboard.messageId,
-              sceneIndex: scene.index,
-              kind: "audio",
-            }),
-            signal: controller.signal,
-          });
-          const payload = (await response.json().catch(() => ({}))) as {
-            scene?: GeneratedStoryboardOption["script"]["scenes"][number];
-            error?: string;
-          };
-
-          if (!response.ok || !payload.scene) {
-            throw new Error(payload.error ?? "分镜旁白生成失败");
-          }
-
-          patchSceneInActiveStoryboard(payload.scene);
-        }
+        latestScenes = latestScenes.map((item) => (item.index === payload.scene!.index ? payload.scene! : item));
+        patchSceneInActiveStoryboard(payload.scene);
       }
 
-      setGenerationStatus(controller.signal.aborted ? "已中断生成，已完成的画面和旁白会保留" : "分镜画面和旁白生成完成");
+      const audioErrors: string[] = [];
+
+      for (const scene of latestScenes) {
+        if (controller.signal.aborted) {
+          break;
+        }
+
+        const currentScene = latestScenes.find((item) => item.index === scene.index) ?? scene;
+        const audioAssetSucceeded = currentScene.generation?.audio?.status === "succeeded" && Boolean(currentScene.generation.audio.url);
+
+        if (controller.signal.aborted) {
+          break;
+        }
+
+        if (audioAssetSucceeded) {
+          continue;
+        }
+
+        setGenerationStatus(`正在生成第 ${scene.index} 个分镜旁白`);
+        setGeneratingSceneIndex(scene.index);
+        setGeneratingAssetKind("audio");
+        patchSceneGenerationState(scene.index, {
+          audio: {
+            ...currentScene.generation?.audio,
+            status: "generating",
+            prompt: currentScene.narration,
+          },
+        });
+        const response = await fetch(`/api/projects/${projectId}/agent/storyboards/assets`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messageId: activeStoryboard.messageId,
+            sceneIndex: scene.index,
+            kind: "audio",
+          }),
+          signal: controller.signal,
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          scene?: GeneratedStoryboardOption["script"]["scenes"][number];
+          error?: string;
+        };
+
+        if (!response.ok || !payload.scene) {
+          const errorMessage = payload.error ?? "分镜旁白生成失败";
+          audioErrors.push(`第 ${scene.index} 个分镜旁白失败：${errorMessage}`);
+          patchSceneGenerationState(scene.index, {
+            audio: {
+              status: "failed",
+              prompt: currentScene.narration,
+              error: errorMessage,
+              generatedAt: new Date().toISOString(),
+            },
+          });
+          continue;
+        }
+
+        latestScenes = latestScenes.map((item) => (item.index === payload.scene!.index ? payload.scene! : item));
+        patchSceneInActiveStoryboard(payload.scene);
+      }
+
+      setGenerationStatus(
+        controller.signal.aborted
+          ? mode === "html-animation"
+            ? "已中断生成，已完成的 HTML 动画和旁白会保留"
+            : "已中断生成，已完成的画面和旁白会保留"
+          : audioErrors.length > 0
+            ? mode === "html-animation"
+              ? `HTML 动画已生成，${audioErrors.length} 个旁白失败`
+              : `分镜画面已生成，${audioErrors.length} 个旁白失败`
+          : mode === "html-animation"
+            ? "HTML 动画和旁白生成完成"
+            : "分镜画面和旁白生成完成",
+      );
+      setError(audioErrors[0] ?? "");
       if (!controller.signal.aborted) {
         onProjectsChange?.();
       }
     } catch (generateError) {
       if (generateError instanceof DOMException && generateError.name === "AbortError") {
-        setGenerationStatus("已中断生成，已完成的画面和旁白会保留");
+        setGenerationStatus(mode === "html-animation" ? "已中断生成，已完成的 HTML 动画和旁白会保留" : "已中断生成，已完成的画面和旁白会保留");
       } else {
-        setError(generateError instanceof Error ? generateError.message : "分镜画面或旁白生成失败");
+        setError(generateError instanceof Error ? generateError.message : mode === "html-animation" ? "HTML 动画或旁白生成失败" : "分镜画面或旁白生成失败");
       }
     } finally {
       abortControllerRef.current = null;
       setGenerating(false);
       setGeneratingSceneIndex(null);
+      setGeneratingAssetKind(null);
       void loadGeneratedStoryboards();
     }
   }
@@ -409,9 +619,15 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
         duration: formatDuration(frame.durationMs),
         thumbnailClass: "media-frame",
         thumbnailUrl: frame.imageUrl,
+        htmlUrl: frame.htmlUrl,
         audioUrl: frame.audioUrl,
         onPlayAudio: handlePlayAudio,
-        statusLabel: frame.index === generatingSceneIndex ? "生成中" : frame.imageStatus === "succeeded" ? "已生成" : generating ? "待生成" : "未生成",
+        statusLabel:
+          frame.index === generatingSceneIndex
+            ? generatingAssetKind === "audio"
+              ? "旁白生成中"
+              : "画面生成中"
+            : getFrameVisualStatusLabel(frame, mode, generating),
         isGenerating: frame.index === generatingSceneIndex,
         badge:
           mode === "html-animation" ? (
@@ -472,7 +688,7 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
         actionSlot={
           <div className="flex items-center gap-2">
             <div className="hidden text-xs text-slate-500 md:block">
-              画面 {generatedCount}/{frames.length} · 旁白 {audioGeneratedCount}/{frames.length}
+              {mode === "html-animation" ? "HTML" : "画面"} {generatedCount}/{frames.length} · 旁白 {audioGeneratedCount}/{frames.length}
               {generationStatus ? <span className="ml-2 text-slate-700">{generationStatus}</span> : null}
             </div>
             <Button
@@ -538,7 +754,7 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
                       {frame.index} {frame.title}
                     </div>
                     <div className="mt-1 flex justify-between text-[11px] text-slate-500">
-                      <span>{frame.imageStatus === "succeeded" ? "画面已生成" : "画面未生成"}</span>
+                      <span>{mode === "html-animation" ? `HTML ${getAssetStatusLabel(frame.htmlStatus, false)}` : `画面 ${getAssetStatusLabel(frame.imageStatus, false)}`}</span>
                       <span>{formatDuration(frame.durationMs)}</span>
                     </div>
                   </button>
@@ -547,14 +763,23 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
             </div>
             <div className="min-w-0 overflow-y-auto p-5">
               <div className="media-frame relative aspect-video overflow-hidden rounded-xl">
-                {selectedFrame.imageUrl && (
+                {selectedFrame.htmlUrl && mode === "html-animation" && (
+                  <iframe
+                    title={`${selectedFrame.title} HTML 动画`}
+                    src={selectedFrame.htmlUrl}
+                    sandbox="allow-scripts"
+                    scrolling="no"
+                    className="absolute inset-0 size-full border-0"
+                  />
+                )}
+                {selectedFrame.imageUrl && mode !== "html-animation" && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={selectedFrame.imageUrl} alt={`${selectedFrame.title} 生成画面`} className="absolute inset-0 size-full object-cover" />
                 )}
                 {selectedFrame.index === generatingSceneIndex && (
                   <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950/55 text-white backdrop-blur-[1px]">
                     <span className="size-10 animate-spin rounded-full border-2 border-white/35 border-t-white" />
-                    <span className="mt-3 text-sm font-medium">正在生成第 {selectedFrame.index} 个分镜画面</span>
+                    <span className="mt-3 text-sm font-medium">正在生成第 {selectedFrame.index} 个{mode === "html-animation" ? " HTML 动画" : "分镜画面"}</span>
                   </div>
                 )}
               </div>
@@ -568,13 +793,16 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
                 <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 font-mono text-xs text-slate-700">{formatDuration(selectedFrame.durationMs)}</span>
               </div>
               <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <p className="text-xs font-medium text-slate-500">画面提示词</p>
+                <p className="text-xs font-medium text-slate-500">{mode === "html-animation" ? "动画提示词" : "画面提示词"}</p>
                 <p className="mt-1 text-sm leading-6 text-slate-800">{selectedFrame.prompt}</p>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-600">
-                <div className="rounded-lg border border-slate-200 p-3">画面状态：{selectedFrame.imageStatus === "succeeded" ? "已生成" : "未生成"}</div>
                 <div className="rounded-lg border border-slate-200 p-3">
-                  声音状态：{selectedFrame.audioStatus === "succeeded" ? "已生成" : "未生成"}
+                  {mode === "html-animation" ? "HTML 状态" : "画面状态"}：
+                  {getFrameVisualStatusLabel(selectedFrame, mode, false)}
+                </div>
+                <div className="rounded-lg border border-slate-200 p-3">
+                  声音状态：{getAssetStatusLabel(selectedFrame.audioStatus, false)}
                   {selectedFrame.audioUrl ? (
                     <button type="button" className="ml-2 font-medium text-[#1554ff]" onClick={() => handlePlayAudio(selectedFrame.audioUrl!)}>
                       播放

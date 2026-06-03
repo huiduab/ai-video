@@ -1,5 +1,7 @@
+import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getHtmlAnimationStyle } from "@/lib/html-animation-styles";
 import { isProjectMode, mapProjectDetail, toDbProjectMode } from "@/lib/project-mappers";
 
 interface RouteContext {
@@ -33,11 +35,13 @@ export async function PATCH(request: Request, context: RouteContext) {
     const body = (await request.json().catch(() => ({}))) as {
       title?: unknown;
       mode?: unknown;
+      htmlAnimationStyleId?: unknown;
     };
 
     const data: {
       title?: string;
       mode?: ReturnType<typeof toDbProjectMode>;
+      metadata?: Prisma.InputJsonValue;
     } = {};
 
     if (typeof body.title === "string" && body.title.trim()) {
@@ -50,6 +54,23 @@ export async function PATCH(request: Request, context: RouteContext) {
       }
 
       data.mode = toDbProjectMode(body.mode);
+    }
+
+    if (body.htmlAnimationStyleId !== undefined) {
+      const currentProject = await prisma.project.findFirst({
+        where: { id: projectId, deletedAt: null },
+        select: { metadata: true },
+      });
+
+      if (!currentProject) {
+        return NextResponse.json({ error: "Project not found" }, { status: 404 });
+      }
+
+      const base = currentProject.metadata && typeof currentProject.metadata === "object" && !Array.isArray(currentProject.metadata) ? currentProject.metadata : {};
+      data.metadata = {
+        ...base,
+        htmlAnimationStyleId: getHtmlAnimationStyle(body.htmlAnimationStyleId).id,
+      } as Prisma.InputJsonValue;
     }
 
     const project = await prisma.project.update({
@@ -80,4 +101,3 @@ export async function DELETE(_request: Request, context: RouteContext) {
     return NextResponse.json({ error: "Failed to delete project" }, { status: 500 });
   }
 }
-

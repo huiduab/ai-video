@@ -29,13 +29,21 @@ function validateGenerationState(value: unknown): SceneGenerationState | undefin
 
   const generation = value as Partial<SceneGenerationState>;
   const image = validateGeneratedAsset(generation.image);
+  const htmlBase = validateGeneratedAsset(generation.html);
+  const html =
+    htmlBase && generation.html && typeof generation.html === "object" && !Array.isArray(generation.html)
+      ? {
+          ...htmlBase,
+          code: typeof generation.html.code === "string" ? generation.html.code : undefined,
+        }
+      : undefined;
   const audio = validateGeneratedAsset(generation.audio);
 
-  if (!image && !audio) {
+  if (!image && !html && !audio) {
     return undefined;
   }
 
-  return { image, audio };
+  return { image, html, audio };
 }
 
 function validateScene(value: unknown, fallbackIndex: number): VideoScriptScene {

@@ -1,3 +1,5 @@
+import { access, stat } from "node:fs/promises";
+import path from "node:path";
 import { AgentMessageRole, Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { validateAgentIntent } from "@/lib/agent/intent-validator";
@@ -33,7 +35,90 @@ function mergeActiveMessageId(metadata: unknown, messageId: string): Prisma.Inpu
   } as Prisma.InputJsonValue;
 }
 
-function collectGeneratedStoryboards(messages: Array<{ id: string; createdAt: Date; intentJson: unknown }>) {
+async function generatedPublicUrlExists(url: string | undefined, minSizeBytes = 1) {
+  if (!url) {
+    return false;
+  }
+
+  if (url.startsWith("data:")) {
+    return true;
+  }
+
+  if (!url.startsWith("/generated/")) {
+    return true;
+  }
+
+  const relativePath = url.replace(/^\/+/, "").split(/[?#]/)[0];
+
+  try {
+    const filePath = path.join(process.cwd(), "public", relativePath);
+    await access(filePath);
+    const fileStat = await stat(filePath);
+    return fileStat.size >= minSizeBytes;
+  } catch {
+    return false;
+  }
+}
+
+async function normalizeMissingGeneratedAssets(script: VideoScriptResult) {
+  const scenes = await Promise.all(
+    script.scenes.map(async (scene) => {
+      const image = scene.generation?.image;
+      const html = scene.generation?.html;
+      const audio = scene.generation?.audio;
+      const [imageOk, htmlOk, audioOk] = await Promise.all([
+        image?.status === "succeeded" && image.url ? generatedPublicUrlExists(image.url) : Promise.resolve(true),
+        html?.status === "succeeded" && html.url ? generatedPublicUrlExists(html.url) : Promise.resolve(true),
+        audio?.status === "succeeded" && audio.url ? generatedPublicUrlExists(audio.url, 128) : Promise.resolve(true),
+      ]);
+
+      if (imageOk && htmlOk && audioOk) {
+        return scene;
+      }
+
+      return {
+        ...scene,
+        generation: {
+          ...scene.generation,
+          image:
+            image && !imageOk
+              ? {
+                  ...image,
+                  status: "failed" as const,
+                  url: undefined,
+                  error: "本地图片文件不存在，请重新生成",
+                }
+              : image,
+          html:
+            html && !htmlOk
+              ? {
+                  ...html,
+                  status: "failed" as const,
+                  url: undefined,
+                  error: "本地 HTML 文件不存在，请重新生成",
+                }
+              : html,
+          audio:
+            audio && !audioOk
+              ? {
+                  ...audio,
+                  status: "failed" as const,
+                  url: undefined,
+                  error: "本地音频文件不存在，请重新生成",
+                }
+              : audio,
+        },
+      };
+    }),
+  );
+
+  return {
+    ...script,
+    scenes,
+  };
+}
+
+async function collectGeneratedStoryboards(messages: Array<{ id: string; createdAt: Date; intentJson: unknown }>) {
   const storyboards: GeneratedStoryboard[] = [];
 
   for (const message of messages) {
@@ -50,7 +135,7 @@ function collectGeneratedStoryboards(messages: Array<{ id: string; createdAt: Da
         title: script.title,
         summary: script.summary,
         createdAt: message.createdAt.toISOString(),
-        script,
+        script: await normalizeMissingGeneratedAssets(script),
       });
     } catch {
       // Ignore malformed historical records; workspace only uses validated generated scripts.
@@ -83,7 +168,7 @@ export async function GET(_request: Request, context: RouteContext) {
       take: 30,
     });
 
-    const storyboards = collectGeneratedStoryboards(messages);
+    const storyboards = await collectGeneratedStoryboards(messages);
     const configuredActiveId = getActiveMessageId(project.metadata);
     const activeMessageId = storyboards.some((storyboard) => storyboard.messageId === configuredActiveId)
       ? configuredActiveId

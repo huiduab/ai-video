@@ -7,8 +7,10 @@ export interface StoryboardFrame {
   holdAfterMs?: number;
   thumbnailUrl: string | null;
   imageUrl?: string;
+  htmlUrl?: string;
   audioUrl?: string;
   imageStatus?: import("@/types/agent").SceneAssetStatus;
+  htmlStatus?: import("@/types/agent").SceneAssetStatus;
   audioStatus?: import("@/types/agent").SceneAssetStatus;
   prompt: string;
   narration: string;

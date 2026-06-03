@@ -1,6 +1,7 @@
 import { ProjectStatus, TaskStatus, TaskType } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { DEFAULT_HTML_ANIMATION_STYLE_ID } from "@/lib/html-animation-styles";
 import { isProjectMode, mapProject, toDbProjectMode } from "@/lib/project-mappers";
 
 export async function GET(request: Request) {
@@ -43,6 +44,7 @@ export async function POST(request: Request) {
           mode: toDbProjectMode(mode),
           status: ProjectStatus.INITIALIZING,
           durationMs,
+          metadata: mode === "html-animation" ? { htmlAnimationStyleId: DEFAULT_HTML_ANIMATION_STYLE_ID } : undefined,
         },
       });
 

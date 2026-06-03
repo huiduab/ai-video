@@ -15,7 +15,9 @@ interface VideoPreviewProps {
   narration?: string;
   prompt?: string;
   imageUrl?: string | null;
+  htmlUrl?: string | null;
   imageStatus?: string;
+  htmlStatus?: string;
   currentTime?: string;
   totalTime?: string;
   frames?: StoryboardFrame[];
@@ -231,7 +233,9 @@ export function VideoPreview({
   narration,
   prompt,
   imageUrl,
+  htmlUrl,
   imageStatus,
+  htmlStatus,
   currentTime = "00:00",
   totalTime = "00:00",
   frames = [],
@@ -291,7 +295,9 @@ export function VideoPreview({
   const displayNarration = displayFrame?.narration ?? narration;
   const displayPrompt = displayFrame?.prompt ?? prompt;
   const displayImageUrl = displayFrame?.imageUrl ?? imageUrl;
+  const displayHtmlUrl = displayFrame?.htmlUrl ?? htmlUrl;
   const displayImageStatus = displayFrame?.imageStatus ?? imageStatus;
+  const displayHtmlStatus = displayFrame?.htmlStatus ?? htmlStatus;
   const subtitleCues = useMemo(() => splitNarrationToSubtitleCues(displayFrame?.narration), [displayFrame?.narration]);
   const activeSubtitle = playbackState.inBreathGap ? "" : getActiveSubtitle(subtitleCues, playbackState.frameProgress);
   const displayedCurrentTime = hasPlaybackFrames ? formatDuration(playheadMs) : currentTime;
@@ -299,6 +305,7 @@ export function VideoPreview({
   const progressPercent = totalDurationMs > 0 ? clampProgress(playheadMs / totalDurationMs) * 100 : 0;
   const hasGeneratedContent = Boolean(displayTitle || displayNarration || displayPrompt);
   const hasImage = Boolean(displayImageUrl);
+  const hasHtml = Boolean(displayHtmlUrl);
 
   frameElapsedMsRef.current = playbackState.frameElapsedMs;
 
@@ -491,7 +498,34 @@ export function VideoPreview({
       )}
       aria-label="视频预览"
     >
-      {hasImage ? (
+      {hasHtml ? (
+        <>
+          {previousVisible && playbackState.previousFrame?.htmlUrl && (
+            <iframe
+              key={`previous-html-${playbackState.previousFrame.id}`}
+              title={`${playbackState.previousFrame.title} HTML 动画`}
+              src={playbackState.previousFrame.htmlUrl}
+              sandbox="allow-scripts"
+              scrolling="no"
+              className="pointer-events-none absolute inset-0 size-full border-0"
+              style={{
+                opacity: transitionType === "crossfade" || transitionType === "fade" ? 1 - transitionProgress : 1,
+              }}
+            />
+          )}
+          <iframe
+            key={`html-${displayFrame?.id ?? "single"}-${seekRevision}`}
+            title={displayTitle ? `${displayTitle} HTML 动画` : "HTML 动画"}
+            src={displayHtmlUrl ?? ""}
+            sandbox="allow-scripts"
+            scrolling="no"
+            className="pointer-events-none absolute inset-0 size-full border-0"
+            style={{
+              opacity: transitionType === "crossfade" || transitionType === "fade" ? transitionProgress : 1,
+            }}
+          />
+        </>
+      ) : hasImage ? (
         <>
           {previousVisible && playbackState.previousFrame?.imageUrl && (
             <div
@@ -574,12 +608,14 @@ export function VideoPreview({
         </div>
       )}
 
-      {!hasImage && hasGeneratedContent && (
+      {!hasImage && !hasHtml && hasGeneratedContent && (
         <div className="absolute left-5 top-5 z-10 max-w-[58%] rounded-xl bg-slate-950/58 p-4 text-white backdrop-blur">
           <h2 className="text-lg font-semibold">{displayTitle}</h2>
           {displayNarration && <p className="mt-2 line-clamp-3 text-sm leading-6 text-white/86">{displayNarration}</p>}
-          {displayPrompt && <p className="mt-2 line-clamp-2 text-xs leading-5 text-white/62">画面：{displayPrompt}</p>}
-          {!hasImage && displayImageStatus !== "succeeded" && <p className="mt-2 text-xs text-white/62">画面尚未生成</p>}
+          {displayPrompt && <p className="mt-2 line-clamp-2 text-xs leading-5 text-white/62">{displayHtmlStatus ? "动画" : "画面"}：{displayPrompt}</p>}
+          {!hasImage && !hasHtml && (displayHtmlStatus ?? displayImageStatus) !== "succeeded" && (
+            <p className="mt-2 text-xs text-white/62">{displayHtmlStatus ? "HTML 动画尚未生成" : "画面尚未生成"}</p>
+          )}
           {audioError && <p className="mt-2 text-xs text-rose-100">旁白播放失败：{audioError}</p>}
         </div>
       )}

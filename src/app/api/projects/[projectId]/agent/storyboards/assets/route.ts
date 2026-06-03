@@ -1,11 +1,15 @@
 import { randomUUID } from "node:crypto";
+import { access, stat } from "node:fs/promises";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { AgentMessageRole, AssetType, Prisma, TaskStatus, TaskType } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { buildAgentDisplay } from "@/lib/agent/display";
+import { parseAgentJson } from "@/lib/agent/intent-validator";
 import { validateAgentIntent } from "@/lib/agent/intent-validator";
 import { prisma } from "@/lib/db";
+import { readHtmlAnimationStyleExample } from "@/lib/html-animation-style-examples";
+import { getHtmlAnimationStyleFromMetadata, type AnimationStyle } from "@/lib/html-animation-styles";
 import { getScriptCoverImage, getScriptDurationMs } from "@/lib/storyboard-playback";
 import type { AgentIntentResult, GeneratedSceneAsset, SceneGenerationState, VideoScriptResult } from "@/types/agent";
 
@@ -44,11 +48,12 @@ const defaultPollTimeoutMs = 120000;
 const defaultTtsModel = "qwen3-tts-flash";
 const defaultTtsVoice = "Li";
 const defaultTtsFormat = "mp3";
+const defaultHtmlAnimationModel = "gemini-3-flash-preview";
 
 function getEvolinkConfig() {
   return {
     apiKey: process.env.EVOLINK_API_KEY ?? "",
-    baseUrl: (process.env.EVOLINK_BASE_URL ?? defaultEvolinkBaseUrl).replace(/\/$/, ""),
+    baseUrl: (process.env.EVOLINK_BASE_URL ?? defaultEvolinkBaseUrl).trim().replace(/\/$/, ""),
     model: process.env.EVOLINK_IMAGE_MODEL ?? defaultImageModel,
     size: process.env.EVOLINK_IMAGE_SIZE ?? defaultImageSize,
     pollIntervalMs: toPositiveInt(process.env.EVOLINK_IMAGE_POLL_INTERVAL_MS, defaultPollIntervalMs),
@@ -60,11 +65,19 @@ function getTtsConfig() {
   const explicitPath = process.env.AI_TTS_PATH?.trim();
   return {
     apiKey: process.env.AI_API_KEY ?? "",
-    baseUrl: (process.env.AI_BASE_URL ?? "").replace(/\/$/, ""),
+    baseUrl: (process.env.AI_BASE_URL ?? "").trim().replace(/\/$/, ""),
     model: process.env.AI_TTS_MODEL ?? defaultTtsModel,
     voice: process.env.AI_TTS_VOICE ?? defaultTtsVoice,
     responseFormat: process.env.AI_TTS_RESPONSE_FORMAT ?? defaultTtsFormat,
     paths: explicitPath ? [normalizeEndpointPath(explicitPath)] : ["/audio/speech", "/tts"],
+  };
+}
+
+function getHtmlAnimationConfig() {
+  return {
+    apiKey: process.env.AI_API_KEY ?? "",
+    baseUrl: (process.env.AI_BASE_URL ?? "").trim().replace(/\/$/, ""),
+    model: process.env.AI_HTML_ANIMATION_MODEL ?? process.env.AI_MODEL ?? defaultHtmlAnimationModel,
   };
 }
 
@@ -82,9 +95,20 @@ function buildImageAssetState(asset: GeneratedSceneAsset, current?: SceneGenerat
   };
 }
 
+function buildHtmlAssetState(asset: GeneratedSceneAsset & { code?: string }, current?: SceneGenerationState): SceneGenerationState {
+  return {
+    image: current?.image,
+    html: asset,
+    audio: current?.audio ?? {
+      status: "idle",
+    },
+  };
+}
+
 function buildAudioAssetState(asset: GeneratedSceneAsset, current?: SceneGenerationState): SceneGenerationState {
   return {
     image: current?.image,
+    html: current?.html,
     audio: asset,
   };
 }
@@ -122,6 +146,12 @@ async function updateProjectSummaryFromScript(projectId: string, script: VideoSc
     metadataPatch.coverImageAssetId = coverImage.assetId;
   }
 
+  const coverHtml = script.scenes.find((scene) => scene.generation?.html?.url)?.generation?.html;
+
+  if (coverHtml?.url) {
+    metadataPatch.coverHtmlUrl = coverHtml.url;
+  }
+
   await prisma.project.update({
     where: { id: projectId },
     data: {
@@ -135,6 +165,16 @@ async function updateProjectSummaryFromScript(projectId: string, script: VideoSc
 
 function normalizeEndpointPath(value: string) {
   return value.startsWith("/") ? value : `/${value}`;
+}
+
+function buildAbsoluteEndpointUrl(baseUrl: string, endpointPath: string) {
+  const url = `${baseUrl.trim().replace(/\/$/, "")}${normalizeEndpointPath(endpointPath)}`;
+
+  try {
+    return new URL(url).toString();
+  } catch {
+    throw new Error(`Invalid endpoint URL: ${url}`);
+  }
 }
 
 function buildStyleConsistencyPrompt(style: VideoScriptResult["styleConsistency"]) {
@@ -163,6 +203,175 @@ function buildImagePrompt(scene: VideoScriptResult["scenes"][number], style?: Vi
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function buildHtmlAnimationSystemPrompt() {
+  return `
+你是一个网页动画工程设计师。
+你必须只返回一个合法 JSON 对象，不能使用 Markdown，不能添加解释文字。
+
+任务：为单个视频分镜生成一个可本地保存、可在 iframe 中播放的完整单文件 HTML 动画。
+
+硬性要求：
+1. 返回 JSON 格式为 { "html": "<!doctype html>..." }。
+2. html 必须包含完整 <!doctype html>、html、head、style、body 和必要 script。
+3. 使用 HTML、CSS、SVG、JavaScript、Canvas 中合适的技术实现网页动画展示。
+4. 画布必须是 16:9，自适应容器，不能依赖外部网络资源、远程字体、远程脚本、远程图片或 CDN。
+5. 代码应自动播放动画，动画时长贴合分镜 durationMs；可以循环，但首次播放必须完整表达该分镜。
+6. 字幕和旁白由外层播放器负责，不要在 HTML 内重复展示旁白全文。
+7. 严格保持 styleConsistency 里的画风、颜色变量、材质、光影、镜头语言、主体设计和动效节奏。
+8. 如果提供 previousSceneHtml 或 nextSceneHtml，必须参考它们的变量命名、DOM 层级、色彩、元素质感和运动节奏；previousSceneHtml 用于承接上一个分镜，nextSceneHtml 用于预留过渡到下一个分镜。
+9. 代码不得访问 parent/window.top，不得发起网络请求，不得使用 alert、prompt、confirm、localStorage、cookie。
+10. 用 CSS 变量集中定义主题色、背景、光影和动效参数，便于后续局部重生成时保持前后一致。
+11. 如果会话中提供 htmlAnimationStyleRule，必须把 htmlAnimationStyleRule.prompt 作为最高优先级风格约束。
+12. 如果会话中提供 htmlAnimationStyleExample，必须参考示例 HTML 的视觉语言、CSS 技法、DOM 组织和动效节奏；不要照抄示例文字内容。
+`;
+}
+
+function buildHtmlAnimationStyleMessages(style: AnimationStyle, exampleHtml: string) {
+  return [
+    {
+      role: "user" as const,
+      content: JSON.stringify({
+        messageType: "htmlAnimationStyleRule",
+        instruction: "后续单分镜 HTML 动画生成必须优先遵循这个风格提示词。",
+        htmlAnimationStyleRule: {
+          id: style.id,
+          name: style.name,
+          description: style.description,
+          prompt: style.prompt,
+        },
+      }),
+    },
+    {
+      role: "user" as const,
+      content: JSON.stringify({
+        messageType: "htmlAnimationStyleExample",
+        instruction: "这是当前风格对应的示例 HTML。只参考视觉语言、CSS 技法、DOM 组织和动效节奏，不要照抄示例文本内容。",
+        styleId: style.id,
+        htmlAnimationStyleExample: exampleHtml,
+      }),
+    },
+  ];
+}
+
+function buildHtmlAnimationUserContent({
+  script,
+  sceneIndex,
+  htmlAnimationStyle,
+}: {
+  script: VideoScriptResult;
+  sceneIndex: number;
+  htmlAnimationStyle: AnimationStyle;
+}) {
+  const scene = script.scenes.find((item) => item.index === sceneIndex);
+  const previousScene = [...script.scenes].reverse().find((item) => item.index < sceneIndex && item.generation?.html?.code);
+  const nextScene = script.scenes.find((item) => item.index > sceneIndex && item.generation?.html?.code);
+
+  return JSON.stringify({
+    mode: "html-animation",
+    videoTitle: script.title,
+    summary: script.summary,
+    styleConsistency: script.styleConsistency,
+    htmlAnimationStyle: {
+      id: htmlAnimationStyle.id,
+      name: htmlAnimationStyle.name,
+      description: htmlAnimationStyle.description,
+      prompt: htmlAnimationStyle.prompt,
+    },
+    currentScene: scene
+      ? {
+          index: scene.index,
+          title: scene.title,
+          narration: scene.narration,
+          visualPrompt: scene.visualPrompt,
+          animationPrompt: scene.animationPrompt ?? scene.visualPrompt,
+          durationMs: scene.durationMs,
+        }
+      : null,
+    previousSceneHtml: previousScene
+      ? {
+          label: `前一个已生成分镜：${previousScene.index} ${previousScene.title}`,
+          code: previousScene.generation?.html?.code,
+        }
+      : null,
+    nextSceneHtml: nextScene
+      ? {
+          label: `后一个已生成分镜：${nextScene.index} ${nextScene.title}`,
+          code: nextScene.generation?.html?.code,
+        }
+      : null,
+    output: {
+      html: "返回完整单文件 HTML 字符串",
+    },
+  });
+}
+
+function normalizeGeneratedHtml(value: unknown) {
+  const payload = typeof value === "string" ? parseAgentJson(value) : value;
+  const html = payload && typeof payload === "object" && !Array.isArray(payload) ? (payload as { html?: unknown }).html : undefined;
+
+  if (typeof html !== "string" || !html.trim()) {
+    throw new Error("HTML animation response must include html");
+  }
+
+  const trimmed = html.trim();
+  return trimmed.toLowerCase().startsWith("<!doctype html") ? trimmed : `<!doctype html>\n${trimmed}`;
+}
+
+async function callHtmlAnimationModel({
+  baseUrl,
+  apiKey,
+  model,
+  script,
+  sceneIndex,
+  htmlAnimationStyle,
+  htmlAnimationStyleExample,
+}: {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  script: VideoScriptResult;
+  sceneIndex: number;
+  htmlAnimationStyle: AnimationStyle;
+  htmlAnimationStyleExample: string;
+}) {
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.25,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: buildHtmlAnimationSystemPrompt() },
+        ...buildHtmlAnimationStyleMessages(htmlAnimationStyle, htmlAnimationStyleExample),
+        { role: "user", content: buildHtmlAnimationUserContent({ script, sceneIndex, htmlAnimationStyle }) },
+      ],
+    }),
+  });
+  const payload = (await response.json().catch(() => ({}))) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    error?: unknown;
+  };
+
+  if (!response.ok) {
+    throw new Error(extractEvolinkError(payload, `HTML animation request failed: ${response.status}`));
+  }
+
+  return normalizeGeneratedHtml(payload.choices?.[0]?.message?.content);
+}
+
+async function loadProjectHtmlAnimationStyle(projectId: string) {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { metadata: true },
+  });
+
+  return getHtmlAnimationStyleFromMetadata(project?.metadata);
 }
 
 async function submitEvolinkImageTask({
@@ -325,6 +534,33 @@ async function saveAudioBytes({
   };
 }
 
+async function saveHtmlFile({
+  html,
+  projectId,
+  sceneIndex,
+}: {
+  html: string;
+  projectId: string;
+  sceneIndex: number;
+}) {
+  const bytes = Buffer.from(html, "utf8");
+  const fileName = `scene-${sceneIndex}-animation-${Date.now()}-${randomUUID()}.html`;
+  const relativePath = `/generated/storyboards/${projectId}/${fileName}`;
+  const outputDir = path.join(process.cwd(), "public", "generated", "storyboards", projectId);
+  const outputPath = path.join(outputDir, fileName);
+
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(outputPath, bytes);
+
+  return {
+    contentType: "text/html; charset=utf-8",
+    fileName,
+    sizeBytes: bytes.byteLength,
+    storageKey: path.join("public", "generated", "storyboards", projectId, fileName).replace(/\\/g, "/"),
+    url: relativePath,
+  };
+}
+
 function extensionFromContentType(contentType: string) {
   if (contentType.includes("jpeg") || contentType.includes("jpg")) {
     return "jpg";
@@ -400,7 +636,7 @@ async function callTts({
           text,
         };
 
-    const response = await fetch(`${baseUrl}${endpointPath}`, {
+    const response = await fetch(buildAbsoluteEndpointUrl(baseUrl, endpointPath), {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -417,15 +653,23 @@ async function callTts({
     }
 
     if (!contentType.includes("application/json")) {
-      return {
-        bytes: Buffer.from(await response.arrayBuffer()),
-        contentType: contentType || contentTypeFromAudioFormat(responseFormat),
-        durationMs: undefined,
-        providerResponse: {
+      const providerResponse = {
           endpointPath,
           responseMode: "binary",
-        },
-      };
+        };
+      const bytes = Buffer.from(await response.arrayBuffer());
+
+      try {
+        const usableAudio = ensureUsableAudioResult(bytes, contentType || contentTypeFromAudioFormat(responseFormat), providerResponse);
+
+        return {
+          ...usableAudio,
+          durationMs: undefined,
+        };
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+        continue;
+      }
     }
 
     const payload = (await response.json().catch(() => ({}))) as unknown;
@@ -438,30 +682,46 @@ async function callTts({
         throw new Error(`Generated audio download failed: ${audioResponse.status}`);
       }
 
-      return {
-        bytes: Buffer.from(await audioResponse.arrayBuffer()),
-        contentType: audioResponse.headers.get("content-type") ?? contentTypeFromAudioFormat(responseFormat),
-        durationMs: parsed.durationMs,
-        providerResponse: {
+      const providerResponse = {
           endpointPath,
           responseMode: "json-url",
           payload,
           audioUrl: parsed.audioUrl,
-        },
-      };
+        };
+      const bytes = Buffer.from(await audioResponse.arrayBuffer());
+
+      try {
+        const usableAudio = ensureUsableAudioResult(bytes, audioResponse.headers.get("content-type") ?? contentTypeFromAudioFormat(responseFormat), providerResponse);
+
+        return {
+          ...usableAudio,
+          durationMs: parsed.durationMs,
+        };
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+        continue;
+      }
     }
 
     if (parsed.audioBase64) {
-      return {
-        bytes: Buffer.from(parsed.audioBase64, "base64"),
-        contentType: parsed.contentType ?? contentTypeFromAudioFormat(responseFormat),
-        durationMs: parsed.durationMs,
-        providerResponse: {
+      const providerResponse = {
           endpointPath,
           responseMode: "json-base64",
           payload,
-        },
-      };
+        };
+      const bytes = Buffer.from(parsed.audioBase64, "base64");
+
+      try {
+        const usableAudio = ensureUsableAudioResult(bytes, parsed.contentType ?? contentTypeFromAudioFormat(responseFormat), providerResponse);
+
+        return {
+          ...usableAudio,
+          durationMs: parsed.durationMs,
+        };
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+        continue;
+      }
     }
 
     lastError = "TTS response did not contain audio data";
@@ -516,6 +776,43 @@ function contentTypeFromAudioFormat(format: string) {
   return "audio/mpeg";
 }
 
+function hasAudioMagicBytes(bytes: Buffer) {
+  if (bytes.length < 12) {
+    return false;
+  }
+
+  const start3 = bytes.subarray(0, 3).toString("ascii");
+  const start4 = bytes.subarray(0, 4).toString("ascii");
+  const wave = bytes.subarray(8, 12).toString("ascii");
+
+  return (
+    start3 === "ID3" ||
+    (bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0) ||
+    (start4 === "RIFF" && wave === "WAVE") ||
+    start4 === "OggS" ||
+    start4 === "fLaC"
+  );
+}
+
+function ensureUsableAudioResult(bytes: Buffer, contentType: string, providerResponse: unknown) {
+  const isAudioContentType = contentType.toLowerCase().startsWith("audio/");
+
+  if (bytes.byteLength < 128 || (!isAudioContentType && !hasAudioMagicBytes(bytes))) {
+    const preview = bytes.subarray(0, 80).toString("utf8").replace(/\s+/g, " ").trim();
+    throw new Error(
+      `TTS response is not usable audio: content-type=${contentType || "unknown"}, bytes=${bytes.byteLength}${
+        preview ? `, preview=${JSON.stringify(preview)}` : ""
+      }`,
+    );
+  }
+
+  return {
+    bytes,
+    contentType: isAudioContentType ? contentType : "audio/mpeg",
+    providerResponse,
+  };
+}
+
 function extractEvolinkError(payload: unknown, fallback: string) {
   if (!payload || typeof payload !== "object") {
     return fallback;
@@ -533,6 +830,89 @@ function extractEvolinkError(payload: unknown, fallback: string) {
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function generatedPublicUrlExists(url: string | undefined, minSizeBytes = 1) {
+  if (!url) {
+    return false;
+  }
+
+  if (url.startsWith("data:")) {
+    return true;
+  }
+
+  if (!url.startsWith("/generated/")) {
+    return true;
+  }
+
+  const relativePath = url.replace(/^\/+/, "").split(/[?#]/)[0];
+
+  try {
+    const filePath = path.join(process.cwd(), "public", relativePath);
+    await access(filePath);
+    const fileStat = await stat(filePath);
+    return fileStat.size >= minSizeBytes;
+  } catch {
+    return false;
+  }
+}
+
+async function normalizeMissingGeneratedAssets(script: VideoScriptResult) {
+  const scenes = await Promise.all(
+    script.scenes.map(async (scene) => {
+      const image = scene.generation?.image;
+      const html = scene.generation?.html;
+      const audio = scene.generation?.audio;
+      const [imageOk, htmlOk, audioOk] = await Promise.all([
+        image?.status === "succeeded" && image.url ? generatedPublicUrlExists(image.url) : Promise.resolve(true),
+        html?.status === "succeeded" && html.url ? generatedPublicUrlExists(html.url) : Promise.resolve(true),
+        audio?.status === "succeeded" && audio.url ? generatedPublicUrlExists(audio.url, 128) : Promise.resolve(true),
+      ]);
+
+      if (imageOk && htmlOk && audioOk) {
+        return scene;
+      }
+
+      return {
+        ...scene,
+        generation: {
+          ...scene.generation,
+          image:
+            image && !imageOk
+              ? {
+                  ...image,
+                  status: "failed" as const,
+                  url: undefined,
+                  error: "本地图片文件不存在，请重新生成",
+                }
+              : image,
+          html:
+            html && !htmlOk
+              ? {
+                  ...html,
+                  status: "failed" as const,
+                  url: undefined,
+                  error: "本地 HTML 文件不存在，请重新生成",
+                }
+              : html,
+          audio:
+            audio && !audioOk
+              ? {
+                  ...audio,
+                  status: "failed" as const,
+                  url: undefined,
+                  error: "本地音频文件不存在，请重新生成",
+                }
+              : audio,
+        },
+      };
+    }),
+  );
+
+  return {
+    ...script,
+    scenes,
+  };
 }
 
 export async function POST(request: Request, context: RouteContext) {
@@ -554,8 +934,8 @@ export async function POST(request: Request, context: RouteContext) {
       return NextResponse.json({ error: "Message id and scene index are required" }, { status: 400 });
     }
 
-    if (kind !== "image" && kind !== "audio") {
-      return NextResponse.json({ error: "Asset kind must be image or audio" }, { status: 400 });
+    if (kind !== "image" && kind !== "html" && kind !== "audio") {
+      return NextResponse.json({ error: "Asset kind must be image, html or audio" }, { status: 400 });
     }
 
     const message = await prisma.agentMessage.findFirst({
@@ -572,26 +952,32 @@ export async function POST(request: Request, context: RouteContext) {
     }
 
     const currentIntent = validateAgentIntent(message.intentJson);
-    const script = currentIntent.payload.generatedScript;
+    const rawScript = currentIntent.payload.generatedScript;
 
-    if (!script) {
+    if (!rawScript) {
       return NextResponse.json({ error: "Message does not contain generated storyboard" }, { status: 400 });
     }
 
+    const script = await normalizeMissingGeneratedAssets(rawScript);
     const scene = script.scenes.find((item) => item.index === sceneIndex);
 
     if (!scene) {
       return NextResponse.json({ error: "Scene not found" }, { status: 404 });
     }
 
-    if (kind === "image" && !force && scene.generation?.image?.status === "succeeded" && scene.generation.image.url) {
+    if (kind === "image" && !force && scene.generation?.image?.status === "succeeded" && scene.generation.image.url && (await generatedPublicUrlExists(scene.generation.image.url))) {
       await updateProjectSummaryFromScript(projectId, script);
       return NextResponse.json({ scene, asset: scene.generation.image, skipped: true });
     }
 
-    if (kind === "audio" && !force && scene.generation?.audio?.status === "succeeded" && scene.generation.audio.url) {
+    if (kind === "audio" && !force && scene.generation?.audio?.status === "succeeded" && scene.generation.audio.url && (await generatedPublicUrlExists(scene.generation.audio.url, 128))) {
       await updateProjectSummaryFromScript(projectId, script);
       return NextResponse.json({ scene, asset: scene.generation.audio, skipped: true });
+    }
+
+    if (kind === "html" && !force && scene.generation?.html?.status === "succeeded" && scene.generation.html.url && (await generatedPublicUrlExists(scene.generation.html.url))) {
+      await updateProjectSummaryFromScript(projectId, script);
+      return NextResponse.json({ scene, asset: scene.generation.html, skipped: true });
     }
 
     if (kind === "audio") {
@@ -727,14 +1113,224 @@ export async function POST(request: Request, context: RouteContext) {
           display: buildAgentDisplay(nextIntent),
         });
       } catch (generationError) {
-        await prisma.generationTask.update({
-          where: { id: task.id },
+        const errorMessage = generationError instanceof Error ? generationError.message : String(generationError);
+        const failedAudioState: GeneratedSceneAsset = {
+          status: "failed",
+          prompt: scene.narration,
+          error: errorMessage,
+          generatedAt: new Date().toISOString(),
+        };
+        const nextScript: VideoScriptResult = {
+          ...script,
+          scenes: script.scenes.map((item) =>
+            item.index === sceneIndex
+              ? {
+                  ...item,
+                  generation: buildAudioAssetState(failedAudioState, item.generation),
+                }
+              : item,
+          ),
+        };
+        const nextIntent: AgentIntentResult = {
+          ...currentIntent,
+          payload: {
+            ...currentIntent.payload,
+            generatedScript: nextScript,
+          },
+        };
+
+        await prisma.$transaction([
+          prisma.agentMessage.update({
+            where: { id: message.id },
+            data: {
+              intentJson: nextIntent as unknown as Prisma.InputJsonValue,
+            },
+          }),
+          prisma.generationTask.update({
+            where: { id: task.id },
+            data: {
+              status: TaskStatus.FAILED,
+              errorMessage,
+              finishedAt: new Date(),
+            },
+          }),
+        ]);
+
+        throw generationError;
+      }
+    }
+
+    if (kind === "html") {
+      if (script.mode !== "html-animation") {
+        return NextResponse.json({ error: "HTML animation assets are only available for html-animation projects" }, { status: 400 });
+      }
+
+      const config = getHtmlAnimationConfig();
+
+      if (!config.baseUrl || !config.apiKey) {
+        return NextResponse.json({ error: "AI_BASE_URL and AI_API_KEY are required for HTML animation generation" }, { status: 500 });
+      }
+
+      const task = await prisma.generationTask.create({
+        data: {
+          projectId,
+          type: TaskType.GENERATE_ASSET,
+          status: TaskStatus.RUNNING,
+          progress: 10,
+          startedAt: new Date(),
+          input: {
+            provider: "ai-html-animation",
+            baseUrl: config.baseUrl,
+            model: config.model,
+            messageId,
+            sceneIndex,
+            kind: "html",
+            sourcePrompt: scene.animationPrompt ?? scene.visualPrompt,
+            hasPreviousSceneHtml: Boolean([...script.scenes].reverse().find((item) => item.index < sceneIndex && item.generation?.html?.code)),
+            hasNextSceneHtml: Boolean(script.scenes.find((item) => item.index > sceneIndex && item.generation?.html?.code)),
+          },
+        },
+      });
+
+      try {
+        const htmlAnimationStyle = await loadProjectHtmlAnimationStyle(projectId);
+        const htmlAnimationStyleExample = await readHtmlAnimationStyleExample(htmlAnimationStyle);
+        const html = await callHtmlAnimationModel({
+          baseUrl: config.baseUrl,
+          apiKey: config.apiKey,
+          model: config.model,
+          script,
+          sceneIndex,
+          htmlAnimationStyle,
+          htmlAnimationStyleExample,
+        });
+        const savedHtml = await saveHtmlFile({ html, projectId, sceneIndex });
+        const asset = await prisma.asset.create({
           data: {
-            status: TaskStatus.FAILED,
-            errorMessage: generationError instanceof Error ? generationError.message : String(generationError),
-            finishedAt: new Date(),
+            projectId,
+            type: AssetType.HTML,
+            url: savedHtml.url,
+            storageKey: savedHtml.storageKey,
+            mimeType: savedHtml.contentType,
+            durationMs: scene.durationMs,
+            sizeBytes: BigInt(savedHtml.sizeBytes),
+            metadata: toInputJson({
+              provider: "ai-html-animation",
+              model: config.model,
+              htmlAnimationStyleId: htmlAnimationStyle.id,
+              htmlAnimationStyleName: htmlAnimationStyle.name,
+              messageId,
+              sceneIndex,
+              sourcePrompt: scene.animationPrompt ?? scene.visualPrompt,
+              fileName: savedHtml.fileName,
+            }),
           },
         });
+        const htmlState: GeneratedSceneAsset & { code?: string } = {
+          status: "succeeded",
+          assetId: asset.id,
+          url: savedHtml.url,
+          prompt: scene.animationPrompt ?? scene.visualPrompt,
+          generatedAt: asset.createdAt.toISOString(),
+          durationMs: scene.durationMs,
+          code: html,
+        };
+        const nextScript: VideoScriptResult = {
+          ...script,
+          scenes: script.scenes.map((item) =>
+            item.index === sceneIndex
+              ? {
+                  ...item,
+                  generation: buildHtmlAssetState(htmlState, item.generation),
+                }
+              : item,
+          ),
+        };
+        const nextIntent: AgentIntentResult = {
+          ...currentIntent,
+          payload: {
+            ...currentIntent.payload,
+            generatedScript: nextScript,
+          },
+        };
+
+        await prisma.$transaction([
+          prisma.agentMessage.update({
+            where: { id: message.id },
+            data: {
+              intentJson: nextIntent as unknown as Prisma.InputJsonValue,
+            },
+          }),
+          prisma.generationTask.update({
+            where: { id: task.id },
+            data: {
+              status: TaskStatus.SUCCEEDED,
+              progress: 100,
+              finishedAt: new Date(),
+              output: toInputJson({
+                provider: "ai-html-animation",
+                assetId: asset.id,
+                localUrl: savedHtml.url,
+                storageKey: savedHtml.storageKey,
+              }),
+            },
+          }),
+        ]);
+        await updateProjectSummaryFromScript(projectId, nextScript);
+
+        return NextResponse.json({
+          scene: nextScript.scenes.find((item) => item.index === sceneIndex),
+          asset: htmlState,
+          task: {
+            id: task.id,
+            progress: 100,
+            status: "succeeded",
+          },
+          display: buildAgentDisplay(nextIntent),
+        });
+      } catch (generationError) {
+        const errorMessage = generationError instanceof Error ? generationError.message : String(generationError);
+        const failedHtmlState: GeneratedSceneAsset & { code?: string } = {
+          status: "failed",
+          prompt: scene.animationPrompt ?? scene.visualPrompt,
+          error: errorMessage,
+          generatedAt: new Date().toISOString(),
+        };
+        const nextScript: VideoScriptResult = {
+          ...script,
+          scenes: script.scenes.map((item) =>
+            item.index === sceneIndex
+              ? {
+                  ...item,
+                  generation: buildHtmlAssetState(failedHtmlState, item.generation),
+                }
+              : item,
+          ),
+        };
+        const nextIntent: AgentIntentResult = {
+          ...currentIntent,
+          payload: {
+            ...currentIntent.payload,
+            generatedScript: nextScript,
+          },
+        };
+
+        await prisma.$transaction([
+          prisma.agentMessage.update({
+            where: { id: message.id },
+            data: {
+              intentJson: nextIntent as unknown as Prisma.InputJsonValue,
+            },
+          }),
+          prisma.generationTask.update({
+            where: { id: task.id },
+            data: {
+              status: TaskStatus.FAILED,
+              errorMessage,
+              finishedAt: new Date(),
+            },
+          }),
+        ]);
 
         throw generationError;
       }
