@@ -1,8 +1,9 @@
 import { AgentIntentType, AgentMessageRole, Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { buildAgentDisplay } from "@/lib/agent/display";
+import { planHtmlAnimationLayouts } from "@/lib/agent/html-layout-planner";
 import { mapAgentMessage } from "@/lib/agent/mappers";
-import { callIntentModel } from "@/lib/agent/openai-compatible";
+import { callDirectorModel, callIntentModel } from "@/lib/agent/openai-compatible";
 import { AGENT_INTENT_SYSTEM_PROMPT } from "@/lib/agent/prompt";
 import { parseAgentJson, validateAgentIntent } from "@/lib/agent/intent-validator";
 import { buildVideoScriptSystemPrompt } from "@/lib/agent/script-prompt";
@@ -194,29 +195,66 @@ async function generateVideoScript({
   htmlAnimationStyle: AnimationStyle;
 }) {
   const htmlAnimationStyleExample = mode === "html-animation" ? await readHtmlAnimationStyleExample(htmlAnimationStyle) : "";
-  const raw =
-    (await callIntentModel([
-      { role: "system", content: buildVideoScriptSystemPrompt(mode) },
-      ...(mode === "html-animation" ? buildHtmlAnimationStyleMessages(htmlAnimationStyle, htmlAnimationStyleExample) : []),
-      {
-        role: "user",
-        content: buildScriptRequestContent({
-          userPrompt,
-          projectTitle,
-          mode,
-          intent,
-          memory,
-          htmlAnimationStyle,
-        }),
-      },
-    ])) ?? "";
+  const baseMessages = [
+    { role: "system" as const, content: buildVideoScriptSystemPrompt(mode) },
+    ...(mode === "html-animation" ? buildHtmlAnimationStyleMessages(htmlAnimationStyle, htmlAnimationStyleExample).slice(0, 1) : []),
+    {
+      role: "user" as const,
+      content: buildScriptRequestContent({
+        userPrompt,
+        projectTitle,
+        mode,
+        intent,
+        memory,
+        htmlAnimationStyle,
+      }),
+    },
+  ];
+  let lastRaw = "";
+  let lastError: unknown;
 
-  try {
-    return validateVideoScript(parseAgentJson(raw));
-  } catch (error) {
-    console.error("AI script JSON invalid", { raw, error });
-    throw error;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const repairMessage =
+      attempt === 0
+        ? []
+        : [
+            {
+              role: "user" as const,
+              content: JSON.stringify({
+                messageType: "director-output-repair",
+                instruction:
+                  "你的上一次输出没有通过程序校验。请保持同一个故事结构和分镜数量，重新输出完整 JSON；只输出 JSON，不要解释。",
+                validationError: lastError instanceof Error ? lastError.message : String(lastError),
+                requiredForHtmlAnimation:
+                  mode === "html-animation"
+                    ? {
+                        visualPrompt: "至少 120 字",
+                        animationPrompt: "至少 120 字",
+                        "htmlAnimation.directorPrompt": "至少 120 字",
+                        "htmlAnimation.layerPrompt.background/midground/foreground": "每项至少 60 字",
+                        "htmlAnimation.animationTimeline.start/middle/end": "每项至少 30 字",
+                        "htmlAnimation.cameraPrompt": "至少 60 字",
+                        "htmlAnimation.htmlPrompt": "至少 250 字，必须是可直接给 Gemini Flash 执行的单镜头 HTML 动画提示词",
+                        "htmlAnimation.motionTechniques": "至少 3 条",
+                        "htmlAnimation.negativePrompt": "至少 5 条",
+                        "htmlAnimation.revisionHints": "至少 3 条",
+                      }
+                    : null,
+              }),
+            },
+          ];
+
+    lastRaw = (await callDirectorModel([...baseMessages, ...repairMessage])) ?? "";
+
+    try {
+      return validateVideoScript(parseAgentJson(lastRaw));
+    } catch (error) {
+      lastError = error;
+      console.error("AI script JSON invalid", { attempt: attempt + 1, raw: lastRaw, error });
+    }
   }
+
+  throw lastError instanceof Error ? lastError : new Error("AI script JSON invalid");
 }
 
 export async function GET(_request: Request, context: RouteContext) {
@@ -361,14 +399,18 @@ export async function POST(request: Request, context: RouteContext) {
           memory,
           htmlAnimationStyle,
         });
+        const plannedScript = await planHtmlAnimationLayouts({
+          script: generatedScript,
+          htmlAnimationStyle,
+        });
 
         intent = {
           ...intent,
-          assistantReply: `已生成《${generatedScript.title}》的视频逐字稿和 ${generatedScript.scenes.length} 个分镜。`,
+          assistantReply: `已生成《${plannedScript.title}》的视频逐字稿和 ${plannedScript.scenes.length} 个分镜。`,
           payload: {
             ...intent.payload,
-            outline: generatedScript.scenes.map((scene) => scene.title),
-            generatedScript,
+            outline: plannedScript.scenes.map((scene) => scene.title),
+            generatedScript: plannedScript,
           },
         };
       } catch (error) {

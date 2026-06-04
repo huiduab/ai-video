@@ -121,7 +121,7 @@ HTML 动画处理流程：
 1. 仅 `generatedScript.mode === "html-animation"` 时允许生成。
 2. 使用 `AI_BASE_URL`、`AI_API_KEY` 和 `AI_HTML_ANIMATION_MODEL ?? AI_MODEL` 调用 OpenAI 兼容 `/chat/completions`。
 3. 请求中包含统一 `styleConsistency`、当前分镜 `animationPrompt`、前一个已生成 HTML 代码 `previousSceneHtml` 和后一个已生成 HTML 代码 `nextSceneHtml`；后两个字段没有可用代码时为 `null`。
-4. 模型必须返回 `{ "html": "<!doctype html>..." }`，HTML 需为不依赖外部网络资源的单文件 16:9 网页动画。
+4. 模型必须只返回 `{ "html": "<!doctype html>..." }` JSON 对象；风格示例 HTML 只作为视觉参考，不作为输出格式示例。若兼容服务直接返回完整 HTML 字符串（包括 `<!doctype html>...`、`<html>...` 或 ```html 代码块），后端也会兼容保存；以 `{` 或 `[` 开头的响应会先按 JSON 解包，避免把 JSON 字符串里的转义 HTML 误存成页面。保存前 QA 会拦截 `<!doctype html>{ "html": ... }`、`"html": "<!doctype html...` 等坏包装。HTML 需为不依赖外部网络资源的单文件 16:9 网页动画。
 5. HTML 保存到 `public/generated/storyboards/{projectId}/`，并创建 `AssetType.HTML` 素材记录。
 6. 将结果写回 `agent_messages.intentJson.payload.generatedScript.scenes[].generation.html`，包含 `url`、`assetId`、`prompt`、`durationMs` 和 `code`。
 7. 前端 HTML 动画生成成功后继续用 `kind: "audio"` 生成旁白音频。
@@ -129,7 +129,7 @@ HTML 动画处理流程：
 音频处理流程：
 
 1. 使用 `AI_BASE_URL` 和 `AI_API_KEY` 调用 TTS 服务，默认模型 `qwen3-tts-flash`。
-2. 音色由 `AI_TTS_VOICE` 配置，默认 `Li`；输出格式由 `AI_TTS_RESPONSE_FORMAT` 配置，默认 `mp3`。
+2. 音色由 `AI_TTS_VOICE` 配置，默认 `Neil`（平直、清晰的普通旁白音色）；输出格式由 `AI_TTS_RESPONSE_FORMAT` 配置，默认 `mp3`。
 3. 默认先尝试 `{AI_BASE_URL}/audio/speech`，再尝试 `{AI_BASE_URL}/tts`；如服务路径不同，可用 `AI_TTS_PATH` 固定覆盖。
 4. 接口兼容二进制音频响应，以及返回 `audio.url` / `output.audio.url` / base64 音频数据的 JSON 响应。
 5. 音频保存到 `public/generated/storyboards/{projectId}/`，并创建 `assets` 音频记录。
@@ -142,3 +142,9 @@ HTML 动画处理流程：
 - AI 意图 JSON 非法时应记录 `AI output JSON invalid`。
 - AI 脚本 JSON 非法时应记录 `AI script JSON invalid`。
 - 缺少 `AI_BASE_URL` 或 `AI_API_KEY` 时返回可控错误，不应让前端无响应。
+
+## 2026-06-04 Agent 模型拆分补充
+
+`POST /api/projects/[projectId]/agent/messages` 在生成或重生成大纲时，会先使用 `AI_*` 配置完成意图识别，再使用 `DIRECTOR_*` 配置生成完整脚本和 HTML 动画导演稿。导演稿校验失败时，接口会把具体字段错误反馈给导演模型并重试，最终仍不合格时返回脚本生成失败。
+
+`POST /api/projects/[projectId]/agent/storyboards/assets` 在 `kind: "html"` 时使用 `HTML_*` 配置生成单镜头 HTML。请求会把 `scene.htmlAnimation.htmlPrompt` 作为导演压缩后的单镜头执行提示词传给 Gemini Flash，并允许 GSAP CDN；除 GSAP 外的远程资源、远程字体、远程图片和网络请求仍会被 QA 拦截。

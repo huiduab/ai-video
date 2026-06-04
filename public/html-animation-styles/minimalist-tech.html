@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Minimalist Tech Style</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #111111;
+        color: #ffffff;
+        font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+      }
+      .stage {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        padding: 7vh 7vw 22vh;
+      }
+      .grid {
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px);
+        background-size: 72px 72px;
+        mask-image: linear-gradient(to bottom, #000 0 72%, transparent 92%);
+      }
+      .content {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 6vw;
+        height: 100%;
+        align-items: center;
+      }
+      .eyebrow {
+        margin-bottom: 2vh;
+        color: #8fb6ff;
+        font-size: clamp(16px, 1.8vw, 30px);
+        font-weight: 800;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        opacity: 0;
+        animation: rise 700ms ease-out forwards;
+      }
+      h1 {
+        margin: 0;
+        font-size: clamp(58px, 8.2vw, 132px);
+        font-weight: 900;
+        line-height: 0.92;
+        letter-spacing: 0;
+        opacity: 0;
+        transform: translateY(26px);
+        animation: rise 900ms cubic-bezier(0.16, 1, 0.3, 1) 150ms forwards;
+      }
+      .summary {
+        max-width: 760px;
+        margin: 2.5vh 0 0;
+        color: #cfd8e8;
+        font-size: clamp(20px, 2.1vw, 36px);
+        font-weight: 650;
+        line-height: 1.18;
+        opacity: 0;
+        animation: rise 800ms ease-out 450ms forwards;
+      }
+      .metrics {
+        display: flex;
+        gap: 16px;
+        margin-top: 4vh;
+      }
+      .metric {
+        min-width: 150px;
+        border: 1px solid rgba(143, 182, 255, 0.32);
+        border-radius: 14px;
+        padding: 16px 18px;
+        background: rgba(255,255,255,0.055);
+        box-shadow: 0 18px 55px rgba(0,0,0,0.25);
+        opacity: 0;
+        animation: rise 700ms ease-out calc(650ms + var(--i) * 120ms) forwards;
+      }
+      .metric strong {
+        display: block;
+        color: #ffffff;
+        font-size: clamp(26px, 3vw, 48px);
+        line-height: 1;
+      }
+      .metric span {
+        display: block;
+        margin-top: 8px;
+        color: #9aa8bc;
+        font-size: clamp(13px, 1.2vw, 18px);
+        font-weight: 700;
+      }
+      .diagram {
+        position: relative;
+        aspect-ratio: 1;
+        max-height: 55vh;
+        border-radius: 50%;
+        border: 1px solid rgba(255,255,255,0.14);
+        background: radial-gradient(circle, rgba(36,99,235,0.28), transparent 62%);
+        opacity: 0;
+        animation: fade 700ms ease-out 500ms forwards;
+      }
+      .ring {
+        position: absolute;
+        inset: var(--inset);
+        border: 2px solid rgba(143, 182, 255, 0.55);
+        border-radius: 50%;
+        border-left-color: transparent;
+        animation: spin var(--dur) linear infinite;
+      }
+      .node {
+        position: absolute;
+        width: clamp(130px, 12vw, 210px);
+        border: 1px solid rgba(255,255,255,0.18);
+        border-radius: 14px;
+        padding: 12px 14px;
+        background: rgba(17,17,17,0.82);
+        color: #e8eefb;
+        font-size: clamp(13px, 1.2vw, 19px);
+        font-weight: 800;
+      }
+      .node small { display: block; margin-top: 6px; color: #8fb6ff; font-size: 0.78em; }
+      .n1 { top: 10%; left: -8%; }
+      .n2 { right: -6%; top: 34%; }
+      .n3 { bottom: 14%; left: 14%; }
+      .safe-zone {
+        position: absolute;
+        left: 7vw;
+        right: 7vw;
+        bottom: 10vh;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.16), transparent);
+      }
+      @keyframes rise { to { opacity: 1; transform: translateY(0); } }
+      @keyframes fade { to { opacity: 1; } }
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+  </head>
+  <body>
+    <main class="stage" aria-label="minimalist technology animation preview">
+      <div class="grid"></div>
+      <section class="content">
+        <div>
+          <div class="eyebrow">TECH BRIEF / 01</div>
+          <h1>QUANTUM<br />COMPUTING</h1>
+          <p class="summary">A visual map of qubits, parallel states, and real-world acceleration.</p>
+          <div class="metrics">
+            <div class="metric" style="--i: 0"><strong>128x</strong><span>state space</span></div>
+            <div class="metric" style="--i: 1"><strong>03</strong><span>core layers</span></div>
+            <div class="metric" style="--i: 2"><strong>0.8s</strong><span>signal sync</span></div>
+          </div>
+        </div>
+        <div class="diagram">
+          <div class="ring" style="--inset: 8%; --dur: 18s"></div>
+          <div class="ring" style="--inset: 24%; --dur: 12s"></div>
+          <div class="ring" style="--inset: 40%; --dur: 7s"></div>
+          <div class="node n1">QUBITS<small>superposition</small></div>
+          <div class="node n2">CONTROL<small>error gates</small></div>
+          <div class="node n3">OUTPUT<small>measured result</small></div>
+        </div>
+      </section>
+      <div class="safe-zone"></div>
+    </main>
+  </body>
+</html>

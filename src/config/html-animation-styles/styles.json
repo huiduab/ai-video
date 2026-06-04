@@ -1,34 +1,44 @@
 [
   {
-    "id": "tech-flow",
-    "name": "酷炫黑金数据流 (Dark Tech Flow)",
-    "description": "偏暗炫酷色调，元素依次缓入，虚线箭头流动，适合底层原理讲解。",
-    "prompt": "创建一个可视化概念演示动画。要求：1. 使用偏暗的炫酷色调（深灰/纯黑底色，辅以科技蓝或青色点缀）。2. 构建一个3至4个节点的数据流转或层级结构（比如方块/圆角矩形代表模块）。3. 模块之间用带有\"持续循环流动动画\"的虚线箭头连接。4. 整个页面加载时，实现除了大背景外，各个元素（包括区块、文字）严格按照逻辑顺序依次\"缓入\"出现的排队动画效果，加载总用时控制在3-5秒之间。5. 关键字段文字要大，用高亮颜色强调（带发光效果）。画面仅保留演示动画本身，剔除任何网页导航、按钮。要求代码1000行左右的复杂度效果，纯净视频质感。",
-    "imageUrl": "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?q=80&w=800&auto=format&fit=crop",
-    "exampleFile": "tech-flow.html"
+    "id": "minimalist-tech",
+    "name": "极简科技风",
+    "description": "克制科技、结构清晰、信息层次丰富。",
+    "prompt": "Design: Deep charcoal background (#111111) with crisp white and cool blue accents. Typography: bold sans-serif hierarchy with a large title, short subtitle, compact metrics, and small labeled modules. Layout: Use a rich but restrained composition with a main title, 2-3 supporting data chips, thin connector lines, and an abstract technical diagram. Keep all critical visual content in the upper 72% of the 16:9 canvas and leave the bottom 18-22% as a clean subtitle-safe zone with no important text or objects. Animation: smooth slide-up, staggered line drawing, soft number count-up, subtle parallax. Video-optimized: legible at mobile size, no tiny labels, no scrollbars, avoid empty title-only frames.",
+    "exampleFile": "minimalist-tech.html"
   },
   {
-    "id": "light-science",
-    "name": "亮白科教可视化 (Light Science)",
-    "description": "白色主调，粉/蓝强调色，图文并茂的顺次浮现动画。",
-    "prompt": "生成一个基于纯前端页面进行科普演示的动画素材。要求：1. 使用白色为主色调（高级浅灰/纯白），加以粉红色或明蓝色为强调色点缀。2. 构建结构清晰的科普信息图表（如图文模块或逻辑结构树）。3. 添加每次打开页面时各个元素依次\"缓入并上浮\"出现的动画效果，细化到每行文字或每个小图标的依次展现。4. 增大文字大小，加强图形化显示，并运用加粗、强调色、背景高亮等方式方便进行视频演示。5. 画面纯净，没有多余控件，像高度专业的MG动画。",
-    "imageUrl": "https://images.unsplash.com/photo-1579546929518-9e396f3cc809?q=80&w=800&auto=format&fit=crop",
-    "exampleFile": "light-science.html"
+    "id": "cyber-hud",
+    "name": "赛博终端黑客风",
+    "description": "终端界面、HUD 扫描、信息密度高。",
+    "prompt": "Design: True black background (#000000) with neon green (#00FF66) and cyan (#00D8FF) accents. Typography: monospace terminal style with large command headline, status rows, data panels, scan grid, signal waveform, and protocol chips. Layout: Create a layered HUD interface instead of a plain terminal; include 3-5 readable information blocks and animated system lines. Keep critical content above the lower subtitle-safe zone: no important labels, cursors, charts, or focal elements in the bottom 18-22% of the 16:9 canvas. Animation: typewriter reveals, scanning beam, blinking cursor, panel boot sequence, small glitch cuts. Video-optimized: high contrast, no tiny decorative code, no scrollbars.",
+    "exampleFile": "cyber-hud.html"
   },
   {
-    "id": "3d-rotation",
-    "name": "3D架构空间旋转 (3D Architecture)",
-    "description": "模块整体带3D旋转透视，随循环时间左右摆动。",
-    "prompt": "生成一个3D透视风格的可视化讲解演示动画。要求：1. 构建几个层级分明的区块（例如代表模型的各个Layer层或网络架构）。2. 为展示模块整体添加3D旋转效果（perspective），实现该模块在Y轴上向左和向右约15度的缓慢循环摆动（每循环10-30秒）。3. 所有元素进入时应带有Z轴的前推和缓入动画。4. 色调使用暗色科技风或高级冷色调。5. 利用发光和透明度展现多层重叠的空间感，完全服务于短视频或中视频作为B-Roll背景讲解。",
-    "imageUrl": "https://images.unsplash.com/photo-1617791160536-598cf32026fb?q=80&w=800&auto=format&fit=crop",
-    "exampleFile": "3d-rotation.html"
+    "id": "elegant-academic",
+    "name": "优雅学术纪录片",
+    "description": "经典刊物排版、知识图谱、权威叙事。",
+    "prompt": "Design: Warm off-white background (#FDFBF7) with charcoal text, muted olive, ink blue, and fine editorial rules. Typography: elegant serif display title paired with clean sans-serif captions. Layout: Build an editorial documentary frame with a title, chapter label, short abstract, timeline or annotation strip, and 2-3 diagram callouts. Keep the main title, diagram, and annotations in the upper 72% of the canvas; reserve the bottom 18-22% as subtitle-safe negative space. Animation: soft fade, slow Ken Burns scale, rule drawing, annotation pins appearing in sequence. Video-optimized: refined, readable, richer than a single title page, no small unreadable footnotes.",
+    "exampleFile": "elegant-academic.html"
   },
   {
-    "id": "glowing-network",
-    "name": "节点发光网络 (Glowing Network Nodes)",
-    "description": "强调元素状态，默认发光的节点网络结构，适合AI模型讲解。",
-    "prompt": "创建一个神经网络或拓扑图风格的知识讲解演示页面。要求：1. 背景深邃。2. 使用连线连接多个代表\"神经元\"或\"网络节点\"的组件。3. 为核心节点或线条添加持续的\"强调效果\"动画（例如呼吸灯式的发光变化和色彩流转），并将有hover发光效果的元素设置为默认直接拥有极强的发光效果。4. 整个网络从左向右（或从上到下）依次呈现\"出现\"动画，模拟模型的数据理解处理过程。5. 文字尽量大，极具可读性，适合作为讲解视频的高端配图动画。",
-    "imageUrl": "https://images.unsplash.com/photo-1620825937374-87fc7d6aaf8e?q=80&w=800&auto=format&fit=crop",
-    "exampleFile": "glowing-network.html"
+    "id": "kinetic-retention",
+    "name": "动力学完播风",
+    "description": "快节奏、强冲击、短视频吸睛。",
+    "prompt": "Design: High-energy saturated background using bright yellow, black, white, and one bold accent color. Typography: extra-bold sans-serif or Impact-style words mixed with stickers, arrows, progress bars, and punchy callouts. Layout: Use a dynamic collage with a large headline, 2-3 supporting punch phrases, motion arrows, burst shapes, and a retention progress motif. Keep all big words and visual anchors above the bottom subtitle-safe zone; never place key text in the bottom 18-22% of the canvas. Animation: elastic pop-ins, fast word-by-word reveals, swipe cuts, bounce highlights, progress pulse. Video-optimized: readable, energetic, rich composition without clutter.",
+    "exampleFile": "kinetic-retention.html"
+  },
+  {
+    "id": "data-magazine",
+    "name": "数据杂志风",
+    "description": "商业图表、编辑式数据故事、清爽专业。",
+    "prompt": "Design: Clean editorial data visualization style with white background, graphite text, cobalt blue, coral, and lime accents. Typography: bold editorial sans-serif title with compact chart labels. Layout: Present a business insight like a magazine spread: headline, key number, bar/line chart, comparison cards, legend, and one explanatory callout. Keep the lower 18-22% of the canvas mostly empty for subtitles; charts and key numbers must sit in the upper 72%. Animation: chart bars grow, line path draws, cards slide in, key metric counts up. Video-optimized: clear hierarchy, no dense spreadsheet text, no bottom subtitle overlap.",
+    "exampleFile": "data-magazine.html"
+  },
+  {
+    "id": "product-blueprint",
+    "name": "产品蓝图风",
+    "description": "分层拆解、产品结构、步骤讲解。",
+    "prompt": "Design: Blueprint-inspired explainer with soft midnight background, cyan grid lines, off-white panels, and warm amber highlights. Typography: modern sans-serif with technical labels and concise step captions. Layout: Show a product, workflow, or concept as layered cards connected by arrows: main object, 3 feature modules, numbered steps, and a small status rail. Keep the composition lifted: important panels, labels, and arrows stay above the bottom subtitle-safe zone, leaving the lower 18-22% visually quiet. Animation: blueprint lines draw, modules expand, arrows trace paths, feature cards flip or slide. Video-optimized: rich but organized, readable labels, no tiny engineering annotations.",
+    "exampleFile": "product-blueprint.html"
   }
 ]

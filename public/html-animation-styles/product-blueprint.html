@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Product Blueprint Style</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #091221;
+        color: #f5fbff;
+        font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+      }
+      .stage {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        padding: 6vh 6vw 23vh;
+      }
+      .grid {
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(rgba(88, 203, 255, 0.08) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(88, 203, 255, 0.08) 1px, transparent 1px);
+        background-size: 48px 48px;
+        mask-image: linear-gradient(to bottom, #000 0 74%, transparent 95%);
+      }
+      .layout {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: 0.86fr 1.14fr;
+        gap: 5vw;
+        height: 100%;
+        align-items: center;
+      }
+      .kicker {
+        color: #58cbff;
+        font-size: clamp(15px, 1.45vw, 24px);
+        font-weight: 900;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+      h1 {
+        margin: 2vh 0;
+        font-size: clamp(52px, 7vw, 118px);
+        line-height: 0.94;
+        letter-spacing: 0;
+      }
+      .copy {
+        max-width: 620px;
+        color: #b8c9d8;
+        font-size: clamp(18px, 1.8vw, 30px);
+        font-weight: 650;
+        line-height: 1.26;
+      }
+      .rail {
+        display: flex;
+        gap: 10px;
+        margin-top: 4vh;
+      }
+      .step {
+        min-width: 110px;
+        border: 1px solid rgba(88,203,255,0.36);
+        border-radius: 12px;
+        padding: 12px 14px;
+        background: rgba(88,203,255,0.08);
+        color: #dff7ff;
+        font-size: clamp(13px, 1vw, 17px);
+        font-weight: 850;
+      }
+      .blueprint {
+        position: relative;
+        height: 56vh;
+      }
+      .core {
+        position: absolute;
+        left: 26%;
+        top: 20%;
+        width: 44%;
+        height: 46%;
+        border: 2px solid #58cbff;
+        border-radius: 28px;
+        background: rgba(88,203,255,0.08);
+        box-shadow: 0 0 70px rgba(88,203,255,0.18);
+      }
+      .core::before {
+        content: "";
+        position: absolute;
+        inset: 24px;
+        border: 1px dashed rgba(245,251,255,0.35);
+        border-radius: 20px;
+      }
+      .module {
+        position: absolute;
+        width: clamp(170px, 15vw, 250px);
+        border: 1px solid rgba(245,251,255,0.22);
+        border-radius: 16px;
+        padding: 16px;
+        background: rgba(9,18,33,0.9);
+        box-shadow: 0 18px 50px rgba(0,0,0,0.3);
+        animation: float 3s ease-in-out infinite alternate;
+      }
+      .module strong {
+        display: block;
+        color: #ffd166;
+        font-size: clamp(18px, 1.65vw, 28px);
+      }
+      .module span {
+        display: block;
+        margin-top: 8px;
+        color: #b8c9d8;
+        font-size: clamp(12px, 1.05vw, 17px);
+        font-weight: 750;
+      }
+      .m1 { left: 0; top: 4%; }
+      .m2 { right: 2%; top: 14%; animation-delay: 250ms; }
+      .m3 { left: 16%; bottom: 8%; animation-delay: 500ms; }
+      .arrow {
+        position: absolute;
+        height: 2px;
+        background: linear-gradient(90deg, transparent, #58cbff);
+        transform-origin: left center;
+      }
+      .a1 { left: 19%; top: 28%; width: 20%; transform: rotate(12deg); }
+      .a2 { right: 22%; top: 34%; width: 18%; transform: rotate(164deg); }
+      .a3 { left: 30%; bottom: 27%; width: 18%; transform: rotate(-26deg); }
+      .safe {
+        position: absolute;
+        left: 6vw;
+        right: 6vw;
+        bottom: 9vh;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(88,203,255,0.22), transparent);
+      }
+      @keyframes float { to { transform: translateY(-10px); } }
+    </style>
+  </head>
+  <body>
+    <main class="stage" aria-label="product blueprint animation preview">
+      <div class="grid"></div>
+      <section class="layout">
+        <div>
+          <div class="kicker">Blueprint Explainer</div>
+          <h1>Build the<br />System</h1>
+          <p class="copy">Layered cards explain what the product does, why it matters, and how each step connects.</p>
+          <div class="rail">
+            <div class="step">01 Map</div>
+            <div class="step">02 Connect</div>
+            <div class="step">03 Launch</div>
+          </div>
+        </div>
+        <div class="blueprint">
+          <div class="core"></div>
+          <div class="arrow a1"></div>
+          <div class="arrow a2"></div>
+          <div class="arrow a3"></div>
+          <div class="module m1"><strong>Input Layer</strong><span>collect signals and user intent</span></div>
+          <div class="module m2"><strong>AI Engine</strong><span>generate structured decisions</span></div>
+          <div class="module m3"><strong>Output Flow</strong><span>deliver polished visual steps</span></div>
+        </div>
+      </section>
+      <div class="safe"></div>
+    </main>
+  </body>
+</html>

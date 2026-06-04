@@ -8,6 +8,8 @@
 | `/create` | `src/app/create/page.tsx` | 创建项目 loading 页 |
 | `/workspace` | `src/app/workspace/page.tsx` | 主工作区 |
 
+根布局 `src/app/layout.tsx` 的 `<html>` 使用 `suppressHydrationWarning`，用于兼容浏览器插件在 hydration 前向根节点注入属性（例如沉浸式翻译的 `data-immersive-translate-page-theme`）导致的开发环境 hydration 告警。根节点同时声明 `data-scroll-behavior="smooth"`，与全局 `html { scroll-behavior: smooth; }` 对齐，避免 Next.js 开发环境滚动行为提示。
+
 ## 组件分组
 
 ### 通用组件
@@ -73,18 +75,22 @@ workspace page
 - 点击 `AI 生成` 后会按分镜顺序先生成画面，再调用同一素材接口生成该分镜旁白音频；已成功的画面或音频会跳过，未完成的部分会继续补齐。
 - `AI 生成` 的资产队列把画面和旁白都作为分镜素材处理：会先补齐所有分镜画面或 HTML 动画，再补齐旁白音频。生成旁白时，当前分镜会立即标记为 `旁白生成中`，完成后写回本地音频 URL；旁白失败时显示可重试状态，但不会阻塞后续分镜画面或 HTML 动画生成，再次点击 `AI 生成` 会继续补齐。
 - HTML 动画模式下，点击 `AI 生成` 会先按分镜顺序生成所有本地 HTML 动画文件，再调用同一素材接口补齐分镜旁白音频；已成功的 HTML 或音频会跳过，未完成的部分会继续补齐。
+- HTML 动画模式下，时间线操作区只保留 `AI 生成` 入口；已成功的 HTML 会跳过，失败或未完成的 HTML 会在再次点击 `AI 生成` 时继续补齐。
 - HTML 动画生成结果保存在 `scene.generation.html`，`url` 指向本地 HTML 文件，主预览、时间线缩略图和分镜详情弹窗都会通过 sandbox iframe 展示该动画。
+- HTML 动画脚本现在可包含 `scene.htmlAnimation` 动画导演蓝图，描述模板、图形隐喻、运动节拍、视线移动、强调时刻和转场意图；后端会用 `src/lib/html-animation-templates.ts` 选择模板规则，减少自由排版导致的元素交错。
+- 主预览里的 HTML iframe 支持外层播放器同步协议。`VideoPreview` 会在播放、暂停、拖动和 iframe 加载时发送 `motionweave:play`、`motionweave:pause`、`motionweave:seek` 消息；新生成 HTML 会注入基础 bridge，尽量让 CSS/Web Animations 跟随外层播放状态。
 - HTML 动画生成失败时，后端会把 `scene.generation.html.status` 写为 `failed` 并保留错误文本；刷新页面后时间线和分镜详情会显示“生成失败”，再次点击 `AI 生成` 会从失败或未完成的分镜继续补齐。
-- AI 助手输入区提供绿色魔法棒风格按钮，点击后弹出居中的 HTML 动画风格大卡片；卡片展示风格提示词和 iframe 示例。风格规则维护在 `src/config/html-animation-styles/styles.json`，示例 HTML 维护在 `public/html-animation-styles/`。选择风格后写入当前项目 `metadata.htmlAnimationStyleId` 并自动关闭弹窗，后续脚本生成和 HTML 动画生成都会附加该风格；未选择或旧项目保存了已删除风格时，默认使用 `tech-flow` 酷炫黑金数据流风格。
+- AI 助手输入区提供绿色魔法棒风格按钮，点击后弹出居中的 HTML 动画风格大卡片；卡片展示风格提示词和 iframe 示例。风格示例 iframe 使用固定 1280x720 舞台等比例缩小到卡片预览框，避免大字号示例被裁剪成局部画面。风格规则维护在 `src/config/html-animation-styles/styles.json`，示例 HTML 维护在 `public/html-animation-styles/`。当前示例不再使用单一大标题页，而是包含标题、辅助信息、图形/数据/节点等多层内容，并统一把关键信息放在画面上方约 72% 区域，底部 18-22% 留作字幕安全区。选择风格后写入当前项目 `metadata.htmlAnimationStyleId` 并自动关闭弹窗，后续脚本生成和 HTML 动画生成都会附加该风格；未选择或旧项目保存了已删除风格时，默认使用 `minimalist-tech` 极简科技风。当前可选风格包含极简科技风、赛博终端黑客风、优雅学术纪录片、动力学完播风、数据杂志风和产品蓝图风。
 - 声音生成结果保存在 `scene.generation.audio`，音频完成后由 `audio.durationMs` 驱动该分镜时长。
 - 所有播放和汇总时长统一按 `scene.generation.audio.durationMs ?? 3000` 计算；没有旁白音频的分镜默认展示 3 秒。
 - 分镜小卡片右上角显示喇叭图标：有 `audio.url` 时为蓝色并可点击播放；没有音频时为灰色禁用。
 - 已生成图片或 HTML 动画会同步显示在 `VideoPreview`、时间轴缩略图和分镜详情卡片中。
+- 时间线底部分镜卡片保持紧凑尺寸；HTML iframe 缩略图使用内部 16:9 虚拟画布等比例缩小并居中展示，避免卡片变大或动画画面被拉伸。
 - `VideoPreview` 中左上角的分镜介绍卡片只在画面尚未生成时显示；分镜图片生成后，预览画面只保留播放控件和字幕等视频层。
 - `VideoPreview` 接收当前 active 分镜列表，点击预览底部进度条左侧播放按钮会从第一个分镜开始播放图片轮播；底部时间显示为当前播放进度和视频总时长，例如 `00:32 / 01:34`。
 - `VideoPreview` 播放总视频时会按当前播放头所在分镜切换 `frame.audioUrl`，让已生成旁白音频随图片轮播连续播放；单段旁白按钮仍由时间轴独立播放。
 - 播放器底部进度条可随时拖动；点击下方分镜卡片会把播放头跳到该分镜开始位置并暂停，再点击播放会从当前播放头继续。
-- 播放器支持点击画面区域播放/暂停、底部音量滑块调整旁白音量、底部全屏按钮进入或退出浏览器全屏；顶部工具栏不再重复显示音量滑块和全屏按钮。
+- 播放器支持点击画面区域播放/暂停、底部音量滑块调整旁白音量、底部全屏按钮进入或退出浏览器全屏；预览画面不再显示中央播放浮层，顶部工具栏不再重复显示音量滑块和全屏按钮。
 - 分镜时长优先使用对应旁白音频长度，没有音频时回退到 3 秒；旧数据缺失 `audio.durationMs` 时，`StoryboardTimeline` 会在浏览器端读取音频 metadata，重算预览总时长、底部分镜卡片时长和左侧项目列表当前项目时长。
 - 旧数据里的 `generation.image`、`generation.html` 或 `generation.audio` 如果指向已不存在的 `/generated/...` 本地文件，`StoryboardTimeline` 加载时会校验 URL，将该素材临时标记为失败并清空 URL，避免继续显示“已生成”但加载 404；再次点击 `AI 生成` 会补齐缺失素材。后端读取分镜和生成素材时也会校正缺失文件；音频文件还必须满足最小可播放大小，避免 2 bytes 文本响应被当成成功旁白。
 - 每两个分镜之间会额外插入 1 秒气口并计入视频总时长；气口期间 `VideoPreview` 保持显示上一分镜画面，不显示字幕，也不提前播放下一分镜音频。
@@ -94,6 +100,8 @@ workspace page
 - 点击 `AI 生成` 完成画面和旁白后，工作区会刷新左侧项目列表；项目卡片名称使用 Agent 脚本标题，封面使用首个已生成分镜图片，总时长使用全部分镜音频时长相加，缺失音频按 3 秒计算。
 - AI 助手生成新脚本或保存脚本编辑后，会通过工作区父组件刷新 `StoryboardTimeline`，让中间预览和底部分镜立即同步 active generated storyboard。
 - 双击时间轴分镜卡片会打开全部分镜卡片，并自动定位到对应分镜详情；详情弹窗关闭按钮固定在弹窗右上角。
+- 分镜详情弹窗会展示当前分镜的 `旁白` 和 `画面提示词`。弹窗内提供 `重新生成画面` 和 `重新生成旁白` 两个单分镜按钮：HTML 动画模式下画面按钮强制重生成当前分镜 HTML，静态图像视频模式下画面按钮强制重生成当前分镜图片；旁白按钮在两种模式下都会强制重生成当前分镜音频。
+- 分镜详情弹窗使用固定视口高度，左右两栏都有独立的细滚动条；右侧内容区在长旁白或长画面提示词时保持弹窗尺寸不变，用户可在弹窗内滚动查看全部内容。
 
 ## UI 约定
 

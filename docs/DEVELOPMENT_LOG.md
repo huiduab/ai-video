@@ -2,6 +2,41 @@
 
 本文档统一存放项目开发记录。后续开发日志均写入 `docs/DEVELOPMENT_LOG.md`，不再在项目根目录单独维护开发日志文件。
 
+## 2026-06-04 取消 HTML 强制生成入口
+
+- 移除时间线 HTML 动画模式下的 `修复排版`、`增强动效` 和 `重生成 HTML` 三个按钮，操作区只保留 `AI 生成`、版本选择和刷新。
+- 前端 `AI 生成` 不再传入强制重生成参数；HTML 分镜仍按失败或缺失素材补齐，已成功的 HTML 会继续跳过。
+- 后端素材接口移除 `htmlGenerationIntent` 请求字段、模型提示词分支、日志字段和资产 metadata 字段，避免保留三按钮对应的隐藏功能。
+- 修复时间线底部 HTML 缩略图被挤压的问题：分镜卡片保持原有紧凑尺寸，HTML iframe 使用内部 16:9 虚拟画布等比例缩小并居中展示，避免卡片变大或动画画面被拉伸。
+- 记录样式验收规则：如果浏览器中页面退回原生 HTML 样式、CSS 资源 404 或 stylesheet 规则为空，必须先修复并重新验证再结束任务。此次样式丢失原因是运行 `npm run build` 后 `.next` 被生产构建覆盖，而仍在运行的 `next dev` 引用了失效的 CSS 资源。
+- 分镜详情弹窗新增 `旁白` 和 `画面提示词` 展示卡片，并增加 `重新生成画面`、`重新生成旁白` 两个单分镜操作；HTML 动画模式重生成当前 HTML，静态图像视频模式重生成当前图片，旁白重生成在两种模式共用。
+- 分镜详情弹窗改为固定视口高度，并为左右两栏新增独立细滚动条；长旁白和长画面提示词可在弹窗内滚动查看完整内容。
+- 诊断并修复 HTML 动画提示词重复问题：重复来自 `script-validator.ts` 的最低字数补全逻辑，而不是画面渲染。`ensureMinText()` 不再循环追加同一段 fallback，并下调 HTML 动画导演稿的硬字数门槛；脚本生成提示词也移除“至少 120/250 字”等容易诱导凑字数的表述。
+
+## 2026-06-04 00:00:00 +08:00
+
+### HTML 动画生成增强
+
+- 新增 `scene.htmlAnimation` 动画导演蓝图，脚本生成会输出模板、图形隐喻、运动节拍、视线移动、强调时刻和转场意图。
+- 新增 `src/lib/html-animation-templates.ts`，为数据流、分层堆栈、流程时间线、矩阵网格、3D 卡片、PPT 章节页等场景提供模板规则。
+- HTML 动画生成请求会注入模板规则、版式安全区、三层动态元素和 `motionweave:*` 播放协议要求。
+- 保存生成 HTML 前会注入基础运行时 guard/bridge，兜底无滚动条舞台布局，并支持外层播放器发送播放、暂停和 seek 消息。
+- `VideoPreview` 会向 HTML iframe 同步播放、暂停、拖动和加载后的当前位置，减少外层播放器与 iframe 动画各自播放的问题。
+- 修正 HTML iframe 播放同步：播放过程中不再每帧发送 `motionweave:seek`，避免动画被反复拉时间导致闪烁和错位；seek 只在 iframe 加载、拖动和切换分镜时发送。
+- 时间线新增 `重生成 HTML` 按钮，对 HTML 分镜强制重新生成，便于已有素材套用新的模板与安全区规则，同时保留旁白音频。
+- 新增 `src/lib/agent/visual-prompt-standards.ts`，把高级画面提示词规范作为脚本生成和素材生成的严格附加规则，要求主体、构图、镜头、光线、材质、色彩、空间层次、细节密度和 negative constraints 完整明确。
+- 新增 `src/lib/agent/html-animation-patterns.ts`，将数据流、分层结构、PPT 演示、3D 对象、动态关键词和版式安全沉淀为可注入的 HTML 动效策略库。
+- HTML 素材接口新增 `htmlGenerationIntent`，支持 `layout-repair`、`motion-boost` 和 `regenerate`；前端对应新增 `修复排版`、`增强动效`、`重生成 HTML` 三个强制生成入口。
+- HTML 生成后新增基础静态 QA，拦截远程资源、危险浏览器 API、缺失基础结构、未隐藏 overflow 或运行时 bridge 注入失败等明显问题。
+- 同步更新 `docs/AGENT_SYSTEM.md` 和 `docs/FRONTEND_INDEX.md`。
+
+### HTML 动画风格切换为 video-style-demo 版本
+
+- 将 `src/config/html-animation-styles/styles.json` 改为 `D:/Downloads/video-style-demo.zip` 中的 4 个新风格：极简科技风、赛博终端黑客风、优雅学术纪录片、动力学完播风。
+- 将默认 HTML 动画风格从 `tech-flow` 改为 `minimalist-tech`，旧项目保存的已删除风格 id 会继续按现有逻辑回退到默认风格。
+- 新增对应的独立 iframe 示例：`minimalist-tech.html`、`cyber-hud.html`、`elegant-academic.html`、`kinetic-retention.html`。
+- 同步更新 `docs/FRONTEND_INDEX.md` 和 `docs/AGENT_SYSTEM.md` 中的风格来源与默认值说明。
+
 ## 2026-05-31 21:30:00 +08:00
 
 ### 前端 UI 初始化
@@ -791,3 +826,16 @@ interface Message {
 - 删除 `EditorToolbar` / `EditorCanvas` 中已经不再使用的模式切换 prop 链路。
 - 将 `.codex-dev-server.log` 加入 `.gitignore`，避免本地开发服务日志进入版本管理。
 - 同步整理 `docs/FRONTEND_INDEX.md`，记录字幕切分、气口、播放进度拖动、卡片跳转、音量与全屏等工作区播放器行为。
+## 2026-06-04
+
+### DeepSeek 导演模型与 Gemini HTML 执行模型拆分
+
+- 新建实现分支 `codex/deepseek-gsap-director`。
+- 将 Agent 模型调用拆分为意图识别、导演脚本和 HTML 执行三类配置。
+- 新增 `DIRECTOR_API_BASE_URL`、`DIRECTOR_API_KEY`、`DIRECTOR_MODEL`，默认用于 DeepSeek 官方 `deepseek-v4-pro`。
+- 新增 `HTML_API_BASE_URL`、`HTML_API_KEY`、`HTML_MODEL`，默认用于当前 Gemini Flash 中转站。
+- HTML 动画导演稿在 `scene.htmlAnimation` 中新增 `directorPrompt`、`layerPrompt`、`animationTimeline`、`cameraPrompt`、`motionTechniques`、`htmlPrompt`、`negativePrompt` 和 `revisionHints`。
+- `script-validator` 对 HTML 动画导演稿增加最低详细度校验，并在消息接口中对不合格导演输出最多重试 2 次。
+- HTML 执行请求优先使用 `htmlAnimation.htmlPrompt` 作为单镜头执行提示词，避免 Gemini Flash 接收完整故事导致偏题。
+- HTML 安全 QA 允许 GSAP CDN 脚本，但继续拦截其他远程资源、远程图片、远程字体和网络请求。
+- 同步更新 `.env.example`、`docs/AGENT_SYSTEM.md`、`docs/API_INDEX.md` 和 `docs/OPERATIONS.md`。

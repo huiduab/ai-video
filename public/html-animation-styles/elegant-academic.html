@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Elegant Academic Style</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #fdfbf7;
+        color: #222222;
+        font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+      }
+      .stage {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        padding: 6vh 7vw 23vh;
+      }
+      .paper {
+        position: absolute;
+        inset: 4vh 4vw 18vh;
+        border: 1px solid rgba(34,34,34,0.1);
+        background:
+          radial-gradient(circle at 18% 22%, rgba(72, 92, 66, 0.09), transparent 24%),
+          radial-gradient(circle at 76% 28%, rgba(41, 70, 116, 0.08), transparent 26%);
+      }
+      .layout {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: 0.9fr 1.1fr;
+        gap: 5vw;
+        height: 100%;
+        align-items: center;
+      }
+      .chapter {
+        color: #7f8a66;
+        font-size: clamp(15px, 1.45vw, 24px);
+        font-weight: 800;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        opacity: 0;
+        animation: fadeUp 700ms ease-out forwards;
+      }
+      h1 {
+        margin: 2vh 0;
+        color: #222222;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: clamp(56px, 7.3vw, 124px);
+        font-style: italic;
+        font-weight: 500;
+        line-height: 0.94;
+        letter-spacing: 0;
+        opacity: 0;
+        animation: fadeUp 900ms ease-out 180ms forwards;
+      }
+      .abstract {
+        max-width: 620px;
+        color: #4e514a;
+        font-size: clamp(18px, 1.75vw, 30px);
+        font-weight: 520;
+        line-height: 1.28;
+        opacity: 0;
+        animation: fadeUp 800ms ease-out 380ms forwards;
+      }
+      .timeline {
+        margin-top: 4vh;
+        padding-top: 2vh;
+        border-top: 1px solid rgba(34,34,34,0.18);
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 18px;
+        opacity: 0;
+        animation: fadeUp 800ms ease-out 560ms forwards;
+      }
+      .era strong {
+        display: block;
+        color: #294674;
+        font-family: Georgia, serif;
+        font-size: clamp(28px, 2.8vw, 46px);
+        font-weight: 600;
+      }
+      .era span {
+        display: block;
+        margin-top: 8px;
+        color: #686b64;
+        font-size: clamp(12px, 1.1vw, 17px);
+        font-weight: 700;
+      }
+      .diagram {
+        position: relative;
+        height: 55vh;
+      }
+      .plate {
+        position: absolute;
+        inset: 4% 8% 12% 8%;
+        border: 1px solid rgba(34,34,34,0.12);
+        background: rgba(255,255,255,0.38);
+      }
+      .orbit {
+        position: absolute;
+        left: 50%;
+        top: 44%;
+        width: 58%;
+        aspect-ratio: 1;
+        border: 1px solid rgba(41,70,116,0.24);
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        animation: rotate 22s linear infinite;
+      }
+      .core {
+        position: absolute;
+        left: 50%;
+        top: 44%;
+        width: clamp(140px, 16vw, 260px);
+        aspect-ratio: 1;
+        border-radius: 50%;
+        background: radial-gradient(circle, #294674 0 3px, transparent 4px), rgba(127,138,102,0.16);
+        border: 1px solid rgba(127,138,102,0.45);
+        transform: translate(-50%, -50%);
+      }
+      .note {
+        position: absolute;
+        max-width: 220px;
+        padding: 12px 14px;
+        border-left: 3px solid #7f8a66;
+        background: rgba(253,251,247,0.92);
+        color: #383a35;
+        font-size: clamp(13px, 1.15vw, 19px);
+        font-weight: 700;
+        line-height: 1.25;
+        box-shadow: 0 18px 45px rgba(34,34,34,0.08);
+      }
+      .a { left: 0; top: 10%; }
+      .b { right: 0; top: 30%; border-left-color: #294674; }
+      .c { left: 12%; bottom: 10%; }
+      .safe {
+        position: absolute;
+        left: 7vw;
+        right: 7vw;
+        bottom: 9vh;
+        height: 1px;
+        background: rgba(34,34,34,0.12);
+      }
+      @keyframes fadeUp { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: translateY(0); } }
+      @keyframes rotate { to { transform: translate(-50%, -50%) rotate(360deg); } }
+    </style>
+  </head>
+  <body>
+    <main class="stage" aria-label="academic documentary animation preview">
+      <div class="paper"></div>
+      <section class="layout">
+        <div>
+          <div class="chapter">Chapter IV / Field Notes</div>
+          <h1>The Origins<br />of Life</h1>
+          <p class="abstract">From chemical gradients to cellular structure, the story unfolds as connected evidence.</p>
+          <div class="timeline">
+            <div class="era"><strong>01</strong><span>molecules</span></div>
+            <div class="era"><strong>02</strong><span>membranes</span></div>
+            <div class="era"><strong>03</strong><span>systems</span></div>
+          </div>
+        </div>
+        <div class="diagram">
+          <div class="plate"></div>
+          <div class="orbit"></div>
+          <div class="core"></div>
+          <div class="note a">Carbon chains begin to organize.</div>
+          <div class="note b">Energy gradients become repeatable.</div>
+          <div class="note c">Stable boundaries create early cells.</div>
+        </div>
+      </section>
+      <div class="safe"></div>
+    </main>
+  </body>
+</html>

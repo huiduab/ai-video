@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cyber HUD Style</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #000000;
+        color: #00ff66;
+        font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+      }
+      .stage {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        padding: 6vh 6vw 22vh;
+      }
+      .scan {
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(rgba(0,255,102,0.05) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(0,216,255,0.05) 1px, transparent 1px);
+        background-size: 42px 42px;
+      }
+      .beam {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 8%;
+        height: 10vh;
+        background: linear-gradient(to bottom, transparent, rgba(0,255,102,0.22), transparent);
+        animation: beam 3s linear infinite;
+      }
+      .layout {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: 1fr 0.86fr;
+        gap: 4vw;
+        height: 100%;
+        align-items: start;
+      }
+      .terminal {
+        border: 1px solid rgba(0,255,102,0.46);
+        border-radius: 16px;
+        padding: clamp(24px, 3vw, 48px);
+        background: rgba(0, 18, 10, 0.78);
+        box-shadow: 0 0 48px rgba(0,255,102,0.14), inset 0 0 28px rgba(0,255,102,0.08);
+      }
+      .status {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 3vh;
+        color: #00d8ff;
+        font-size: clamp(16px, 1.45vw, 26px);
+        font-weight: 800;
+      }
+      h1 {
+        margin: 0 0 3vh;
+        color: #00ff66;
+        font-size: clamp(48px, 6.4vw, 108px);
+        line-height: 0.96;
+        letter-spacing: 0;
+        text-shadow: 0 0 18px rgba(0,255,102,0.55);
+      }
+      .command {
+        color: #d6ffe5;
+        font-size: clamp(18px, 2vw, 34px);
+        line-height: 1.22;
+      }
+      .command span {
+        display: inline-block;
+        width: 0.7em;
+        height: 1em;
+        margin-left: 0.25em;
+        background: #00ff66;
+        vertical-align: -0.12em;
+        animation: blink 850ms steps(1) infinite;
+      }
+      .panels {
+        display: grid;
+        gap: 16px;
+      }
+      .panel {
+        border: 1px solid rgba(0,216,255,0.34);
+        border-radius: 14px;
+        padding: 16px 18px;
+        background: rgba(0, 8, 16, 0.78);
+        color: #bfffea;
+        transform: translateX(24px);
+        opacity: 0;
+        animation: panelIn 650ms ease-out calc(var(--i) * 140ms) forwards;
+      }
+      .panel strong {
+        display: flex;
+        justify-content: space-between;
+        color: #00d8ff;
+        font-size: clamp(15px, 1.4vw, 24px);
+      }
+      .bar {
+        height: 10px;
+        margin-top: 14px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(0,255,102,0.12);
+      }
+      .bar span {
+        display: block;
+        width: var(--w);
+        height: 100%;
+        background: linear-gradient(90deg, #00ff66, #00d8ff);
+        animation: grow 1.2s ease-out forwards;
+      }
+      .wave {
+        height: 96px;
+        margin-top: 16px;
+        background: repeating-linear-gradient(90deg, rgba(0,255,102,0.9) 0 4px, transparent 4px 20px);
+        clip-path: polygon(0 55%, 6% 20%, 12% 70%, 18% 28%, 24% 65%, 30% 44%, 38% 72%, 46% 22%, 54% 64%, 62% 36%, 70% 78%, 78% 24%, 86% 58%, 94% 30%, 100% 62%, 100% 100%, 0 100%);
+        opacity: 0.72;
+      }
+      .safe-zone {
+        position: absolute;
+        left: 6vw;
+        right: 6vw;
+        bottom: 9vh;
+        color: rgba(0,216,255,0.32);
+        font-size: clamp(11px, 1vw, 15px);
+        letter-spacing: 0.18em;
+        text-align: center;
+      }
+      @keyframes beam { from { transform: translateY(-18vh); } to { transform: translateY(78vh); } }
+      @keyframes blink { 50% { opacity: 0; } }
+      @keyframes panelIn { to { opacity: 1; transform: translateX(0); } }
+      @keyframes grow { from { width: 0; } }
+    </style>
+  </head>
+  <body>
+    <main class="stage" aria-label="cyber terminal animation preview">
+      <div class="scan"></div>
+      <div class="beam"></div>
+      <section class="layout">
+        <div class="terminal">
+          <div class="status"><span>CORE: ONLINE</span><span>TRACE: 04</span><span>LOCK: OK</span></div>
+          <h1>SYSTEM //<br />OVERRIDE</h1>
+          <div class="command">running visual protocol scan<span></span></div>
+        </div>
+        <div class="panels">
+          <div class="panel" style="--i: 0"><strong><span>AUTH GATE</span><span>98%</span></strong><div class="bar"><span style="--w: 98%"></span></div></div>
+          <div class="panel" style="--i: 1"><strong><span>NEURAL BUS</span><span>74%</span></strong><div class="bar"><span style="--w: 74%"></span></div></div>
+          <div class="panel" style="--i: 2"><strong><span>SIGNAL WAVE</span><span>LIVE</span></strong><div class="wave"></div></div>
+        </div>
+      </section>
+      <div class="safe-zone">SUBTITLE SAFE ZONE</div>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Data Magazine Style</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #f7f9fc;
+        color: #1d2433;
+        font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+      }
+      .stage {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        padding: 6vh 6vw 23vh;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: 0.9fr 1.1fr;
+        gap: 4vw;
+        height: 100%;
+        align-items: center;
+      }
+      .kicker {
+        color: #2457d6;
+        font-size: clamp(16px, 1.5vw, 26px);
+        font-weight: 900;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+      h1 {
+        margin: 2vh 0;
+        font-size: clamp(54px, 7.4vw, 126px);
+        line-height: 0.94;
+        letter-spacing: 0;
+      }
+      .lede {
+        color: #526070;
+        font-size: clamp(18px, 1.9vw, 32px);
+        font-weight: 650;
+        line-height: 1.25;
+      }
+      .number {
+        display: inline-flex;
+        align-items: end;
+        gap: 10px;
+        margin-top: 4vh;
+        color: #2457d6;
+      }
+      .number strong {
+        font-size: clamp(68px, 8vw, 140px);
+        line-height: 0.78;
+      }
+      .number span {
+        margin-bottom: 1vh;
+        font-size: clamp(18px, 1.8vw, 30px);
+        font-weight: 900;
+      }
+      .board {
+        display: grid;
+        grid-template-columns: 1fr 0.8fr;
+        gap: 18px;
+      }
+      .chart, .cards {
+        border: 1px solid #d9e1ef;
+        border-radius: 18px;
+        background: #ffffff;
+        box-shadow: 0 18px 55px rgba(40, 54, 84, 0.1);
+      }
+      .chart {
+        padding: 24px;
+      }
+      .chart h2, .cards h2 {
+        margin: 0 0 18px;
+        color: #263142;
+        font-size: clamp(18px, 1.7vw, 28px);
+      }
+      .bars {
+        display: grid;
+        gap: 14px;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 54px 1fr 42px;
+        align-items: center;
+        gap: 12px;
+        color: #667386;
+        font-size: clamp(12px, 1vw, 16px);
+        font-weight: 800;
+      }
+      .track {
+        height: 22px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #eef3f9;
+      }
+      .track span {
+        display: block;
+        width: var(--w);
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #2457d6, #ff6b5f);
+        animation: grow 1s ease-out forwards;
+      }
+      .cards {
+        display: grid;
+        gap: 12px;
+        padding: 20px;
+      }
+      .mini {
+        border-radius: 14px;
+        padding: 16px;
+        color: #101828;
+        background: #f3f7ff;
+      }
+      .mini:nth-child(3) { background: #fff3ef; }
+      .mini:nth-child(4) { background: #f1ffe8; }
+      .mini strong {
+        display: block;
+        font-size: clamp(25px, 2.7vw, 44px);
+        line-height: 1;
+      }
+      .mini span {
+        display: block;
+        margin-top: 8px;
+        color: #667386;
+        font-size: clamp(12px, 1vw, 16px);
+        font-weight: 850;
+      }
+      .safe {
+        position: absolute;
+        left: 6vw;
+        right: 6vw;
+        bottom: 9vh;
+        border-top: 1px dashed rgba(36,87,214,0.18);
+      }
+      @keyframes grow { from { width: 0; } }
+    </style>
+  </head>
+  <body>
+    <main class="stage" aria-label="data magazine animation preview">
+      <section class="layout">
+        <div>
+          <div class="kicker">Market Signal</div>
+          <h1>Growth<br />in Motion</h1>
+          <p class="lede">A compact data story with chart movement, ranked signals, and one clear takeaway.</p>
+          <div class="number"><strong>42%</strong><span>lift</span></div>
+        </div>
+        <div class="board">
+          <div class="chart">
+            <h2>Audience momentum</h2>
+            <div class="bars">
+              <div class="row"><span>Q1</span><div class="track"><span style="--w: 42%"></span></div><span>42</span></div>
+              <div class="row"><span>Q2</span><div class="track"><span style="--w: 58%"></span></div><span>58</span></div>
+              <div class="row"><span>Q3</span><div class="track"><span style="--w: 76%"></span></div><span>76</span></div>
+              <div class="row"><span>Q4</span><div class="track"><span style="--w: 88%"></span></div><span>88</span></div>
+            </div>
+          </div>
+          <div class="cards">
+            <h2>Key drivers</h2>
+            <div class="mini"><strong>01</strong><span>clear hook</span></div>
+            <div class="mini"><strong>02</strong><span>visual proof</span></div>
+            <div class="mini"><strong>03</strong><span>fast recap</span></div>
+          </div>
+        </div>
+      </section>
+      <div class="safe"></div>
+    </main>
+  </body>
+</html>

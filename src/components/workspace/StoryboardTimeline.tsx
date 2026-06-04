@@ -605,6 +605,89 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
     }
   }
 
+  async function handleRegenerateSceneAsset(frame: StoryboardFrame, assetKind: "visual" | "audio") {
+    if (!activeStoryboard || generating) {
+      return;
+    }
+
+    const requestKind = assetKind === "audio" ? "audio" : mode === "html-animation" ? "html" : "image";
+    const statusLabel =
+      assetKind === "audio"
+        ? `正在重新生成第 ${frame.index} 个分镜旁白`
+        : mode === "html-animation"
+          ? `正在重新生成第 ${frame.index} 个 HTML 动画`
+          : `正在重新生成第 ${frame.index} 个分镜画面`;
+
+    setGenerating(true);
+    setGeneratingSceneIndex(frame.index);
+    setGeneratingAssetKind(requestKind);
+    setGenerationStatus(statusLabel);
+    setError("");
+
+    const currentScene = activeStoryboard.script.scenes.find((scene) => scene.index === frame.index);
+
+    if (currentScene) {
+      patchSceneGenerationState(
+        frame.index,
+        requestKind === "audio"
+          ? {
+              audio: {
+                ...currentScene.generation?.audio,
+                status: "generating",
+                prompt: currentScene.narration,
+              },
+            }
+          : mode === "html-animation"
+            ? {
+                html: {
+                  ...currentScene.generation?.html,
+                  status: "generating",
+                  prompt: currentScene.animationPrompt ?? currentScene.visualPrompt,
+                },
+              }
+            : {
+                image: {
+                  ...currentScene.generation?.image,
+                  status: "generating",
+                  prompt: currentScene.visualPrompt,
+                },
+              },
+      );
+    }
+
+    try {
+      const response = await fetch(`/api/projects/${projectId}/agent/storyboards/assets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messageId: activeStoryboard.messageId,
+          sceneIndex: frame.index,
+          kind: requestKind,
+          force: true,
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        scene?: GeneratedStoryboardOption["script"]["scenes"][number];
+        error?: string;
+      };
+
+      if (!response.ok || !payload.scene) {
+        throw new Error(payload.error ?? (requestKind === "audio" ? "分镜旁白重新生成失败" : "分镜画面重新生成失败"));
+      }
+
+      patchSceneInActiveStoryboard(payload.scene);
+      setGenerationStatus(requestKind === "audio" ? `第 ${frame.index} 个分镜旁白已重新生成` : `第 ${frame.index} 个分镜画面已重新生成`);
+      onProjectsChange?.();
+    } catch (regenerateError) {
+      setError(regenerateError instanceof Error ? regenerateError.message : requestKind === "audio" ? "分镜旁白重新生成失败" : "分镜画面重新生成失败");
+    } finally {
+      setGenerating(false);
+      setGeneratingSceneIndex(null);
+      setGeneratingAssetKind(null);
+      void loadGeneratedStoryboards();
+    }
+  }
+
   function handleStopGeneration() {
     abortControllerRef.current?.abort();
     setGenerationStatus("正在中断当前生成请求");
@@ -727,7 +810,7 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
       />
       {detailOpen && selectedFrame && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-4">
-          <div className="relative grid max-h-[84vh] w-full max-w-5xl grid-cols-[260px_minmax(0,1fr)] overflow-hidden rounded-xl bg-white shadow-2xl">
+          <div className="relative grid h-[84vh] min-h-0 w-full max-w-5xl grid-cols-[260px_minmax(0,1fr)] overflow-hidden rounded-xl bg-white shadow-2xl">
             <button
               type="button"
               aria-label="关闭分镜详情"
@@ -736,11 +819,11 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
             >
               <X size={18} />
             </button>
-            <div className="border-r border-slate-200 bg-slate-50 p-3">
+            <div className="flex min-h-0 flex-col border-r border-slate-200 bg-slate-50 p-3">
               <div className="flex items-center">
                 <h2 className="text-sm font-semibold text-slate-950">全部分镜</h2>
               </div>
-              <div className="mt-3 space-y-2 overflow-y-auto pr-1">
+              <div className="thin-scrollbar mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                 {frames.map((frame) => (
                   <button
                     key={frame.id}
@@ -761,7 +844,7 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
                 ))}
               </div>
             </div>
-            <div className="min-w-0 overflow-y-auto p-5">
+            <div className="thin-scrollbar min-h-0 min-w-0 overflow-y-auto p-5 pr-3">
               <div className="media-frame relative aspect-video overflow-hidden rounded-xl">
                 {selectedFrame.htmlUrl && mode === "html-animation" && (
                   <iframe
@@ -784,16 +867,39 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
                 )}
               </div>
               <div className="mt-4 flex items-start justify-between gap-4">
-                <div>
+                <div className="min-w-0">
                   <h3 className="text-lg font-semibold text-slate-950">
                     {selectedFrame.index} {selectedFrame.title}
                   </h3>
-                  <p className="mt-2 text-sm leading-6 text-slate-700">{selectedFrame.narration}</p>
                 </div>
                 <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 font-mono text-xs text-slate-700">{formatDuration(selectedFrame.durationMs)}</span>
               </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={() => void handleRegenerateSceneAsset(selectedFrame, "visual")}
+                  disabled={generating}
+                >
+                  <RefreshCw size={14} />
+                  重新生成画面
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={() => void handleRegenerateSceneAsset(selectedFrame, "audio")}
+                  disabled={generating}
+                >
+                  <RefreshCw size={14} />
+                  重新生成旁白
+                </Button>
+              </div>
               <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <p className="text-xs font-medium text-slate-500">{mode === "html-animation" ? "动画提示词" : "画面提示词"}</p>
+                <p className="text-xs font-medium text-slate-500">旁白</p>
+                <p className="mt-1 text-sm leading-6 text-slate-800">{selectedFrame.narration}</p>
+              </div>
+              <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs font-medium text-slate-500">画面提示词</p>
                 <p className="mt-1 text-sm leading-6 text-slate-800">{selectedFrame.prompt}</p>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-600">

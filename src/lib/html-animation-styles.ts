@@ -19,7 +19,7 @@ interface AnimationStyleConfig {
   exampleFile?: unknown;
 }
 
-export const DEFAULT_HTML_ANIMATION_STYLE_ID = "tech-flow";
+export const DEFAULT_HTML_ANIMATION_STYLE_ID = "minimalist-tech";
 
 const parsedAnimationStyles = (stylesConfig as AnimationStyleConfig[])
   .map((style): AnimationStyle | null => {

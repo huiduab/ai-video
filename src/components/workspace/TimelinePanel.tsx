@@ -122,7 +122,7 @@ export function TimelinePanel({
                     src={item.htmlUrl}
                     sandbox="allow-scripts"
                     scrolling="no"
-                    className="pointer-events-none absolute inset-0 size-full border-0"
+                    className="pointer-events-none absolute left-1/2 top-1/2 h-[90px] w-[160px] -translate-x-1/2 -translate-y-1/2 scale-[0.62] border-0"
                   />
                 )}
                 {item.statusLabel && (

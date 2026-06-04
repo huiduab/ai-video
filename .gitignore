@@ -19,6 +19,7 @@ pnpm-debug.log*
 .codex-next-dev*.log
 .next-dev*.log
 .codex-dev-server.log
+logs/ai-conversations*.log
 *.tsbuildinfo
 
 tmp/

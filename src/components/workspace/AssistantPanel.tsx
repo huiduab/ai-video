@@ -23,6 +23,8 @@ import type { ProjectItem } from "@/types/project";
 
 const MIN_WIDTH = 280;
 const MAX_WIDTH = 520;
+const STYLE_PREVIEW_WIDTH = 1280;
+const STYLE_PREVIEW_HEIGHT = 720;
 
 function formatMessageTime(value: string) {
   const date = new Date(value);
@@ -432,15 +434,7 @@ function StylePickerCard({
                     selected ? "border-emerald-500 bg-emerald-50 shadow-[0_0_0_2px_rgba(16,185,129,0.16)]" : "border-slate-200 bg-white hover:border-emerald-300",
                   )}
                 >
-                  <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-950">
-                    <iframe
-                      title={`${style.name} 示例`}
-                      src={style.exampleUrl}
-                      sandbox="allow-scripts"
-                      scrolling="no"
-                      className="pointer-events-none absolute inset-0 size-full border-0"
-                    />
-                  </div>
+                  <StylePreviewFrame title={`${style.name} 示例`} src={style.exampleUrl} />
                   <div className="min-w-0">
                     <div className="flex items-start justify-between gap-3">
                       <div>
@@ -466,6 +460,53 @@ function StylePickerCard({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function StylePreviewFrame({ title, src }: { title: string; src: string }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [scale, setScale] = useState(220 / STYLE_PREVIEW_WIDTH);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const updateScale = () => {
+      setScale(container.clientWidth / STYLE_PREVIEW_WIDTH);
+    };
+
+    updateScale();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateScale);
+      return () => window.removeEventListener("resize", updateScale);
+    }
+
+    const observer = new ResizeObserver(updateScale);
+    observer.observe(container);
+
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div ref={containerRef} className="relative aspect-video w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-950">
+      <iframe
+        title={title}
+        src={src}
+        width={STYLE_PREVIEW_WIDTH}
+        height={STYLE_PREVIEW_HEIGHT}
+        sandbox="allow-scripts"
+        scrolling="no"
+        className="pointer-events-none absolute left-0 top-0 origin-top-left border-0"
+        style={{
+          width: STYLE_PREVIEW_WIDTH,
+          height: STYLE_PREVIEW_HEIGHT,
+          transform: `scale(${scale})`,
+        }}
+      />
     </div>
   );
 }

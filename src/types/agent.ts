@@ -72,6 +72,7 @@ export interface VideoScriptScene {
   narration: string;
   visualPrompt: string;
   animationPrompt?: string;
+  htmlAnimation?: HtmlAnimationBlueprint;
   playbackEffect?: PlaybackEffect;
   durationMs?: number;
   generation?: SceneGenerationState;
@@ -93,6 +94,45 @@ export interface VideoStyleConsistency {
   cameraLanguage: string;
   renderingRules: string;
   characterDesign?: string;
+}
+
+export type HtmlAnimationTemplateId =
+  | "auto"
+  | "kinetic-title"
+  | "data-flow-network"
+  | "layered-stack"
+  | "comparison-split"
+  | "timeline-process"
+  | "matrix-grid"
+  | "three-d-card"
+  | "ppt-cover-impact";
+
+export interface HtmlAnimationBlueprint {
+  templateId: HtmlAnimationTemplateId;
+  visualMetaphor: string;
+  directorPrompt?: string;
+  layerPrompt?: {
+    background: string;
+    midground: string;
+    foreground: string;
+  };
+  animationTimeline?: {
+    start: string;
+    middle: string;
+    end: string;
+  };
+  cameraPrompt?: string;
+  motionTechniques?: string[];
+  htmlPrompt?: string;
+  negativePrompt?: string[];
+  revisionHints?: string[];
+  motionBeats: Array<{
+    timeMs: number;
+    action: string;
+  }>;
+  focusPath: string;
+  emphasisMoments: string[];
+  transitionIntent: string;
 }
 
 export interface PlaybackEffect {

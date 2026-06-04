@@ -5,11 +5,15 @@ import path from "node:path";
 import { AgentMessageRole, AssetType, Prisma, TaskStatus, TaskType } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { buildAgentDisplay } from "@/lib/agent/display";
+import { logAiConversation } from "@/lib/agent/ai-conversation-log";
+import { buildHtmlAnimationPatternAddendum } from "@/lib/agent/html-animation-patterns";
 import { parseAgentJson } from "@/lib/agent/intent-validator";
 import { validateAgentIntent } from "@/lib/agent/intent-validator";
+import { buildStrictVisualPromptAppendix, IMAGE_PROMPT_APPENDIX } from "@/lib/agent/visual-prompt-standards";
 import { prisma } from "@/lib/db";
 import { readHtmlAnimationStyleExample } from "@/lib/html-animation-style-examples";
 import { getHtmlAnimationStyleFromMetadata, type AnimationStyle } from "@/lib/html-animation-styles";
+import { chooseHtmlAnimationTemplate, type HtmlAnimationTemplate } from "@/lib/html-animation-templates";
 import { getScriptCoverImage, getScriptDurationMs } from "@/lib/storyboard-playback";
 import type { AgentIntentResult, GeneratedSceneAsset, SceneGenerationState, VideoScriptResult } from "@/types/agent";
 
@@ -46,7 +50,7 @@ const defaultImageSize = "16:9";
 const defaultPollIntervalMs = 3000;
 const defaultPollTimeoutMs = 120000;
 const defaultTtsModel = "qwen3-tts-flash";
-const defaultTtsVoice = "Li";
+const defaultTtsVoice = "Neil";
 const defaultTtsFormat = "mp3";
 const defaultHtmlAnimationModel = "gemini-3-flash-preview";
 
@@ -75,9 +79,9 @@ function getTtsConfig() {
 
 function getHtmlAnimationConfig() {
   return {
-    apiKey: process.env.AI_API_KEY ?? "",
-    baseUrl: (process.env.AI_BASE_URL ?? "").trim().replace(/\/$/, ""),
-    model: process.env.AI_HTML_ANIMATION_MODEL ?? process.env.AI_MODEL ?? defaultHtmlAnimationModel,
+    apiKey: process.env.HTML_API_KEY ?? process.env.AI_HTML_ANIMATION_API_KEY ?? process.env.AI_API_KEY ?? "",
+    baseUrl: (process.env.HTML_API_BASE_URL ?? process.env.AI_HTML_ANIMATION_BASE_URL ?? process.env.AI_BASE_URL ?? "").trim().replace(/\/$/, ""),
+    model: process.env.HTML_MODEL ?? process.env.AI_HTML_ANIMATION_MODEL ?? process.env.AI_MODEL ?? defaultHtmlAnimationModel,
   };
 }
 
@@ -199,6 +203,7 @@ function buildImagePrompt(scene: VideoScriptResult["scenes"][number], style?: Vi
   return [
     buildStyleConsistencyPrompt(style),
     scene.visualPrompt,
+    IMAGE_PROMPT_APPENDIX,
     "16:9 cinematic storyboard frame, high quality, clean composition, consistent art direction across all scenes",
   ]
     .filter(Boolean)
@@ -206,6 +211,8 @@ function buildImagePrompt(scene: VideoScriptResult["scenes"][number], style?: Vi
 }
 
 function buildHtmlAnimationSystemPrompt() {
+  const strictVisualPromptAppendix = buildStrictVisualPromptAppendix("html-animation");
+
   return `
 你是一个网页动画工程设计师。
 你必须只返回一个合法 JSON 对象，不能使用 Markdown，不能添加解释文字。
@@ -213,10 +220,11 @@ function buildHtmlAnimationSystemPrompt() {
 任务：为单个视频分镜生成一个可本地保存、可在 iframe 中播放的完整单文件 HTML 动画。
 
 硬性要求：
+0. 响应格式红线：最终响应必须是一个 JSON 对象，且第一个非空字符必须是左花括号，最后一个非空字符必须是右花括号。JSON 只能有一个顶层字段 html。绝对禁止在 JSON 外输出 doctype、html 标签、Markdown 代码块或解释文字。错误示例：doctype 后面再包 JSON、Markdown html 代码块、裸 html 文档。正确示例：{ "html": "<!doctype html><html>...</html>" }。
 1. 返回 JSON 格式为 { "html": "<!doctype html>..." }。
 2. html 必须包含完整 <!doctype html>、html、head、style、body 和必要 script。
 3. 使用 HTML、CSS、SVG、JavaScript、Canvas 中合适的技术实现网页动画展示。
-4. 画布必须是 16:9，自适应容器，不能依赖外部网络资源、远程字体、远程脚本、远程图片或 CDN。
+4. 画布必须是 16:9，自适应容器。唯一允许的外部资源是 GSAP CDN 脚本；禁止远程字体、远程图片、其他远程脚本、fetch 请求或其他 CDN。
 5. 代码应自动播放动画，动画时长贴合分镜 durationMs；可以循环，但首次播放必须完整表达该分镜。
 6. 字幕和旁白由外层播放器负责，不要在 HTML 内重复展示旁白全文。
 7. 严格保持 styleConsistency 里的画风、颜色变量、材质、光影、镜头语言、主体设计和动效节奏。
@@ -225,7 +233,54 @@ function buildHtmlAnimationSystemPrompt() {
 10. 用 CSS 变量集中定义主题色、背景、光影和动效参数，便于后续局部重生成时保持前后一致。
 11. 如果会话中提供 htmlAnimationStyleRule，必须把 htmlAnimationStyleRule.prompt 作为最高优先级风格约束。
 12. 如果会话中提供 htmlAnimationStyleExample，必须参考示例 HTML 的视觉语言、CSS 技法、DOM 组织和动效节奏；不要照抄示例文字内容。
+13. 如果会话中提供 htmlAnimationTemplate，必须优先使用该模板的 layoutRules、motionRules 和 safeAreaRules，不要临时改成无关版式。
+14. 页面必须包含明确舞台容器，例如 .mw-stage，且 html/body/.mw-stage 都必须 width: 100%; height: 100%; margin: 0; overflow: hidden。
+15. 布局必须划分 title-zone、main-zone、accent-zone 或等价区域；主体图形放在中部安全区，不允许普通文档流自然堆叠导致元素交错。
+16. HTML 内只展示短关键词、节点标签和图形注释，不展示旁白全文；底部 18% 作为外层字幕和播放器安全区。
+17. 文本必须使用 clamp()、max-width、line-height 和 overflow-wrap 控制，超长文本要换行或缩短，禁止小字密集堆叠。
+18. 每个分镜至少有 3 个动态层：主标题或关键词、主体图形、辅助强调元素；主体图形必须解释概念，不能只做大字淡入。
+19. CSS 动画必须默认自动播放，同时实现 window message 控制协议：接收 { type: "motionweave:play" }、{ type: "motionweave:pause" }、{ type: "motionweave:seek", timeMs } 时尽量播放、暂停或跳转动画时间线；如果无法精确 seek，也要安全忽略。
+20. 关键 SVG 线条、箭头和数据流必须用 viewBox 坐标和 path 实现，不要用多个随机 div 拼线条。
+21. 必须把用户需求、styleConsistency、htmlAnimationTemplate、htmlAnimationPatterns、currentScene.htmlAnimation 和 strictVisualPromptAppendix 作为“严格附加规则”同时执行；不能只满足其中一部分。
+22. 生成 HTML 之前先在内部完成版式检查：核心元素不得进入底部 18% 字幕区，文本不得相互覆盖，主体图形不得超出 viewport，不能出现滚动条。
+23. 可以使用 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>，但如果使用 GSAP，必须在脚本中提供 CSS keyframes 或 Web Animations API 兜底，避免 CDN 不可用时画面完全静止。
+24. currentScene.htmlAnimation.htmlPrompt 是导演 AI 已经压缩好的单镜头执行提示词，必须优先执行；不要把其他分镜的剧情混入当前镜头。
+
+严格附加的高级画面提示词标准：
+${strictVisualPromptAppendix}
 `;
+}
+
+function buildHtmlAnimationTemplateMessage(template: HtmlAnimationTemplate) {
+  return {
+    role: "user" as const,
+    content: JSON.stringify({
+      messageType: "htmlAnimationTemplate",
+      instruction: "本分镜 HTML 必须优先采用这个动画模板。模板用于约束版式、安全区和运动套路，避免自由排版导致交错。",
+      htmlAnimationTemplate: template,
+    }),
+  };
+}
+
+function buildHtmlAnimationResponseContractMessage() {
+  return {
+    role: "user" as const,
+    content: JSON.stringify({
+      messageType: "htmlAnimationResponseContract",
+      instruction:
+        "最终输出必须严格遵守响应格式契约。只返回一个 JSON 对象，不要返回裸 HTML，不要返回 Markdown，不要返回解释文字，不要把 JSON 包在 <!doctype html> 后面。",
+      requiredShape: {
+        html: "<!doctype html><html><head><style>...</style></head><body><main class=\"mw-stage\">...</main></body></html>",
+      },
+      invalidOutputs: [
+        "<!doctype html>{ \"html\": \"...\" }",
+        "```html\n<!doctype html>...\n```",
+        "<html>...</html>",
+        "{ \"code\": \"...\" }",
+      ],
+      finalCheck: "发送前确认：响应第一个非空字符是 {，顶层只有 html 字段，html 字段值才以 <!doctype html> 开头。",
+    }),
+  };
 }
 
 function buildHtmlAnimationStyleMessages(style: AnimationStyle, exampleHtml: string) {
@@ -247,7 +302,8 @@ function buildHtmlAnimationStyleMessages(style: AnimationStyle, exampleHtml: str
       role: "user" as const,
       content: JSON.stringify({
         messageType: "htmlAnimationStyleExample",
-        instruction: "这是当前风格对应的示例 HTML。只参考视觉语言、CSS 技法、DOM 组织和动效节奏，不要照抄示例文本内容。",
+        instruction:
+          "这是当前风格对应的示例 HTML，仅用于参考视觉语言、CSS 技法、DOM 组织和动效节奏。它不是最终输出格式示例；不要照抄示例文本内容，不要原样返回示例 HTML，最终响应仍必须是 { \"html\": \"<!doctype html>...\" } JSON 对象。",
         styleId: style.id,
         htmlAnimationStyleExample: exampleHtml,
       }),
@@ -265,6 +321,10 @@ function buildHtmlAnimationUserContent({
   htmlAnimationStyle: AnimationStyle;
 }) {
   const scene = script.scenes.find((item) => item.index === sceneIndex);
+  const template = scene ? chooseHtmlAnimationTemplate(scene) : chooseHtmlAnimationTemplate({ index: sceneIndex, title: "", narration: "", visualPrompt: "" });
+  const patternAddendum = scene
+    ? buildHtmlAnimationPatternAddendum(`${script.title} ${script.summary} ${scene.title} ${scene.narration} ${scene.visualPrompt} ${scene.animationPrompt ?? ""}`)
+    : buildHtmlAnimationPatternAddendum(`${script.title} ${script.summary}`);
   const previousScene = [...script.scenes].reverse().find((item) => item.index < sceneIndex && item.generation?.html?.code);
   const nextScene = script.scenes.find((item) => item.index > sceneIndex && item.generation?.html?.code);
 
@@ -286,9 +346,24 @@ function buildHtmlAnimationUserContent({
           narration: scene.narration,
           visualPrompt: scene.visualPrompt,
           animationPrompt: scene.animationPrompt ?? scene.visualPrompt,
+          htmlAnimation: scene.htmlAnimation,
+          directorExecutionPrompt: scene.htmlAnimation?.htmlPrompt ?? scene.animationPrompt ?? scene.visualPrompt,
+          directorNegativePrompt: scene.htmlAnimation?.negativePrompt ?? [],
+          directorMotionTechniques: scene.htmlAnimation?.motionTechniques ?? [],
+          selectedTemplate: template,
           durationMs: scene.durationMs,
         }
       : null,
+    htmlAnimationTemplate: template,
+    htmlAnimationPatterns: patternAddendum,
+    strictVisualPromptAppendix: buildStrictVisualPromptAppendix("html-animation"),
+    layoutContract: {
+      stage: "Use a single fixed 16:9 stage with overflow hidden. Prefer .mw-stage as the root visual container.",
+      zones: ["title-zone: top 8%-20%", "main-zone: center 24%-74%", "accent-zone: sides or corners", "caption-safe-zone: bottom 18%, no core content"],
+      typography: "Use clamp() with max-width and line-height. Use short labels, not narration paragraphs.",
+      motion: "Follow currentScene.htmlAnimation.motionBeats when present. Keep a clear focus path and at least three animated layers.",
+      playbackProtocol: "Implement safe postMessage listeners for motionweave:play, motionweave:pause and motionweave:seek.",
+    },
     previousSceneHtml: previousScene
       ? {
           label: `前一个已生成分镜：${previousScene.index} ${previousScene.title}`,
@@ -307,8 +382,128 @@ function buildHtmlAnimationUserContent({
   });
 }
 
-function normalizeGeneratedHtml(value: unknown) {
-  const payload = typeof value === "string" ? parseAgentJson(value) : value;
+function injectHtmlAnimationRuntime(html: string, durationMs?: number) {
+  const runtime = `
+<style id="motionweave-runtime-guard">
+  html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  body {
+    min-width: 0;
+  }
+
+  .mw-stage, [data-motionweave-stage] {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  .caption-safe-zone, [data-caption-safe-zone] {
+    pointer-events: none;
+  }
+</style>
+<script id="motionweave-runtime-bridge">
+  (() => {
+    const durationMs = ${Math.max(durationMs ?? 5000, 1000)};
+    const animations = () => document.getAnimations ? document.getAnimations({ subtree: true }) : [];
+    window.addEventListener("message", (event) => {
+      const data = event.data || {};
+      if (!data || typeof data.type !== "string" || !data.type.startsWith("motionweave:")) return;
+      if (data.type === "motionweave:play") {
+        animations().forEach((animation) => animation.play());
+      }
+      if (data.type === "motionweave:pause") {
+        animations().forEach((animation) => animation.pause());
+      }
+      if (data.type === "motionweave:seek") {
+        const timeMs = Number.isFinite(data.timeMs) ? Math.max(0, Math.min(data.timeMs, durationMs)) : 0;
+        animations().forEach((animation) => {
+          animation.currentTime = timeMs;
+        });
+      }
+    });
+  })();
+</script>`;
+
+  if (html.includes("motionweave-runtime-bridge")) {
+    return html;
+  }
+
+  if (/<\/head>/i.test(html)) {
+    return html.replace(/<\/head>/i, `${runtime}\n</head>`);
+  }
+
+  return html.replace(/<body([^>]*)>/i, `<body$1>\n${runtime}`);
+}
+
+function validateHtmlAnimationSafety(html: string) {
+  const lowerHtml = html.toLowerCase();
+  const failures: string[] = [];
+  const remoteResourceMatches = Array.from(html.matchAll(/\s(?:src|href)=["'](https?:\/\/[^"']+)["']/gi)).map((match) => match[1]);
+  const disallowedRemoteResources = remoteResourceMatches.filter((url) => !/^https:\/\/cdnjs\.cloudflare\.com\/ajax\/libs\/gsap\/3\.\d+\.\d+\/gsap(?:\.min)?\.js$/i.test(url));
+
+  if (/^\s*<!doctype html>\s*[{[]/i.test(html) || /"html"\s*:\s*"<!doctype html/i.test(html) || /"html"\s*:\s*"<html/i.test(html)) {
+    failures.push("HTML animation response wrapper was written into the HTML file");
+  }
+
+  if (!lowerHtml.includes("<html") || !lowerHtml.includes("<body")) {
+    failures.push("HTML must include html and body tags");
+  }
+
+  if (disallowedRemoteResources.length > 0 || /@import\s+url\(["']?https?:\/\//i.test(html)) {
+    failures.push("HTML animation must not load remote resources except GSAP CDN");
+  }
+
+  if (/\b(window\.top|window\.parent|parent\.|top\.|localStorage|document\.cookie|alert\s*\(|prompt\s*\(|confirm\s*\()/i.test(html)) {
+    failures.push("HTML animation contains forbidden browser API usage");
+  }
+
+  if (!/overflow\s*:\s*hidden/i.test(html)) {
+    failures.push("HTML animation must explicitly hide overflow");
+  }
+
+  if (!/motionweave-runtime-bridge/i.test(html)) {
+    failures.push("HTML animation runtime bridge was not injected");
+  }
+
+  if (failures.length > 0) {
+    throw new Error(`HTML animation QA failed: ${failures.join("; ")}`);
+  }
+}
+
+function normalizeHtmlResponseText(value: string) {
+  return value
+    .trim()
+    .replace(/^```(?:html)?\s*/i, "")
+    .replace(/```$/i, "")
+    .trim();
+}
+
+function isHtmlDocument(value: string) {
+  const lowerValue = value.toLowerCase();
+  return lowerValue.startsWith("<!doctype html") || lowerValue.startsWith("<html");
+}
+
+function normalizeGeneratedHtml(value: unknown, durationMs?: number) {
+  const rawText = typeof value === "string" ? normalizeHtmlResponseText(value) : "";
+  const payload =
+    rawText && (rawText.startsWith("{") || rawText.startsWith("["))
+      ? parseAgentJson(rawText)
+      : rawText && isHtmlDocument(rawText)
+        ? { html: rawText }
+        : typeof value === "string"
+          ? parseAgentJson(value)
+          : value;
   const html = payload && typeof payload === "object" && !Array.isArray(payload) ? (payload as { html?: unknown }).html : undefined;
 
   if (typeof html !== "string" || !html.trim()) {
@@ -316,7 +511,10 @@ function normalizeGeneratedHtml(value: unknown) {
   }
 
   const trimmed = html.trim();
-  return trimmed.toLowerCase().startsWith("<!doctype html") ? trimmed : `<!doctype html>\n${trimmed}`;
+  const normalized = trimmed.toLowerCase().startsWith("<!doctype html") ? trimmed : `<!doctype html>\n${trimmed}`;
+  const withRuntime = injectHtmlAnimationRuntime(normalized, durationMs);
+  validateHtmlAnimationSafety(withRuntime);
+  return withRuntime;
 }
 
 async function callHtmlAnimationModel({
@@ -336,22 +534,41 @@ async function callHtmlAnimationModel({
   htmlAnimationStyle: AnimationStyle;
   htmlAnimationStyleExample: string;
 }) {
+  const scene = script.scenes.find((item) => item.index === sceneIndex);
+  const template = scene ? chooseHtmlAnimationTemplate(scene) : chooseHtmlAnimationTemplate({ index: sceneIndex, title: "", narration: "", visualPrompt: "" });
+  const requestId = randomUUID();
+  const requestBody = {
+    model,
+    temperature: 0.25,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: buildHtmlAnimationSystemPrompt() },
+      ...buildHtmlAnimationStyleMessages(htmlAnimationStyle, htmlAnimationStyleExample),
+      buildHtmlAnimationTemplateMessage(template),
+      buildHtmlAnimationResponseContractMessage(),
+      { role: "user", content: buildHtmlAnimationUserContent({ script, sceneIndex, htmlAnimationStyle }) },
+    ],
+  };
+
+  await logAiConversation({
+    requestId,
+    stage: "html-animation",
+    event: "request",
+    model,
+    baseUrl,
+    payload: {
+      sceneIndex,
+      body: requestBody,
+    },
+  });
+
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model,
-      temperature: 0.25,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: buildHtmlAnimationSystemPrompt() },
-        ...buildHtmlAnimationStyleMessages(htmlAnimationStyle, htmlAnimationStyleExample),
-        { role: "user", content: buildHtmlAnimationUserContent({ script, sceneIndex, htmlAnimationStyle }) },
-      ],
-    }),
+    body: JSON.stringify(requestBody),
   });
   const payload = (await response.json().catch(() => ({}))) as {
     choices?: Array<{ message?: { content?: string } }>;
@@ -359,10 +576,38 @@ async function callHtmlAnimationModel({
   };
 
   if (!response.ok) {
+    await logAiConversation({
+      requestId,
+      stage: "html-animation",
+      event: "error",
+      model,
+      baseUrl,
+      payload: {
+        sceneIndex,
+        status: response.status,
+        body: payload,
+      },
+    });
     throw new Error(extractEvolinkError(payload, `HTML animation request failed: ${response.status}`));
   }
 
-  return normalizeGeneratedHtml(payload.choices?.[0]?.message?.content);
+  const content = payload.choices?.[0]?.message?.content;
+  const html = normalizeGeneratedHtml(content, scene?.durationMs);
+
+  await logAiConversation({
+    requestId,
+    stage: "html-animation",
+    event: "response",
+    model,
+    baseUrl,
+    payload: {
+      sceneIndex,
+      content,
+      normalizedHtml: html,
+    },
+  });
+
+  return html;
 }
 
 async function loadProjectHtmlAnimationStyle(projectId: string) {
@@ -619,7 +864,7 @@ async function callTts({
   paths: string[];
   text: string;
 }) {
-  let lastError = "";
+  const errors: string[] = [];
 
   for (const endpointPath of paths) {
     const isOpenAiSpeechPath = endpointPath.includes("audio/speech");
@@ -648,7 +893,7 @@ async function callTts({
     const contentType = response.headers.get("content-type") ?? "";
 
     if (!response.ok) {
-      lastError = await extractResponseError(response, `TTS request failed: ${response.status}`);
+      errors.push(`${endpointPath}: ${await extractResponseError(response, `TTS request failed: ${response.status}`)}`);
       continue;
     }
 
@@ -667,7 +912,7 @@ async function callTts({
           durationMs: undefined,
         };
       } catch (error) {
-        lastError = error instanceof Error ? error.message : String(error);
+        errors.push(`${endpointPath}: ${error instanceof Error ? error.message : String(error)}`);
         continue;
       }
     }
@@ -698,7 +943,7 @@ async function callTts({
           durationMs: parsed.durationMs,
         };
       } catch (error) {
-        lastError = error instanceof Error ? error.message : String(error);
+        errors.push(`${endpointPath}: ${error instanceof Error ? error.message : String(error)}`);
         continue;
       }
     }
@@ -719,15 +964,15 @@ async function callTts({
           durationMs: parsed.durationMs,
         };
       } catch (error) {
-        lastError = error instanceof Error ? error.message : String(error);
+        errors.push(`${endpointPath}: ${error instanceof Error ? error.message : String(error)}`);
         continue;
       }
     }
 
-    lastError = "TTS response did not contain audio data";
+    errors.push(`${endpointPath}: TTS response did not contain audio data`);
   }
 
-  throw new Error(lastError || "TTS request failed");
+  throw new Error(errors.length > 0 ? `TTS request failed: ${errors.join(" | ")}` : "TTS request failed");
 }
 
 async function extractResponseError(response: Response, fallback: string) {
@@ -1168,7 +1413,7 @@ export async function POST(request: Request, context: RouteContext) {
       const config = getHtmlAnimationConfig();
 
       if (!config.baseUrl || !config.apiKey) {
-        return NextResponse.json({ error: "AI_BASE_URL and AI_API_KEY are required for HTML animation generation" }, { status: 500 });
+        return NextResponse.json({ error: "HTML_API_BASE_URL and HTML_API_KEY are required for HTML animation generation" }, { status: 500 });
       }
 
       const task = await prisma.generationTask.create({

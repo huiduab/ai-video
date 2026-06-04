@@ -257,6 +257,7 @@ export function VideoPreview({
   const playbackAudioRef = useRef<HTMLAudioElement | null>(null);
   const playbackAudioFrameIdRef = useRef<string | null>(null);
   const frameElapsedMsRef = useRef(0);
+  const lastHtmlSyncRef = useRef<{ frameId: string; seekRevision: number } | null>(null);
   const hasPlaybackFrames = frames.length > 0;
   const totalDurationMs = useMemo(() => getFramesTotalDurationMs(frames), [frames]);
   const playbackState = useMemo(() => {
@@ -416,6 +417,40 @@ export function VideoPreview({
     });
   }, [displayFrame?.audioUrl, displayFrame?.id, playbackState.inBreathGap, playing, seekRevision, volume]);
 
+  useEffect(() => {
+    if (!hasHtml || !previewRef.current) {
+      return;
+    }
+
+    const iframes = Array.from(previewRef.current.querySelectorAll<HTMLIFrameElement>("iframe[data-motionweave-html='true']"));
+
+    for (const iframe of iframes) {
+      iframe.contentWindow?.postMessage({ type: playing ? "motionweave:play" : "motionweave:pause" }, "*");
+    }
+  }, [hasHtml, playing]);
+
+  useEffect(() => {
+    if (!hasHtml || !previewRef.current) {
+      return;
+    }
+
+    const frameId = displayFrame?.id ?? "single";
+    const syncKey = { frameId, seekRevision };
+
+    if (lastHtmlSyncRef.current?.frameId === syncKey.frameId && lastHtmlSyncRef.current.seekRevision === syncKey.seekRevision) {
+      return;
+    }
+
+    lastHtmlSyncRef.current = syncKey;
+    const frameTimeMs = hasPlaybackFrames ? frameElapsedMsRef.current : playheadMs;
+    const iframes = Array.from(previewRef.current.querySelectorAll<HTMLIFrameElement>("iframe[data-motionweave-html='true']"));
+
+    for (const iframe of iframes) {
+      iframe.contentWindow?.postMessage({ type: "motionweave:seek", timeMs: frameTimeMs }, "*");
+      iframe.contentWindow?.postMessage({ type: playing ? "motionweave:play" : "motionweave:pause" }, "*");
+    }
+  }, [displayFrame?.id, hasHtml, hasPlaybackFrames, seekRevision]);
+
   function handleSeek(nextMs: number, pause = false) {
     const boundedMs = Math.min(Math.max(nextMs, 0), totalDurationMs);
     setPlayheadMs(boundedMs);
@@ -505,6 +540,7 @@ export function VideoPreview({
               key={`previous-html-${playbackState.previousFrame.id}`}
               title={`${playbackState.previousFrame.title} HTML 动画`}
               src={playbackState.previousFrame.htmlUrl}
+              data-motionweave-html="true"
               sandbox="allow-scripts"
               scrolling="no"
               className="pointer-events-none absolute inset-0 size-full border-0"
@@ -517,9 +553,15 @@ export function VideoPreview({
             key={`html-${displayFrame?.id ?? "single"}-${seekRevision}`}
             title={displayTitle ? `${displayTitle} HTML 动画` : "HTML 动画"}
             src={displayHtmlUrl ?? ""}
+            data-motionweave-html="true"
             sandbox="allow-scripts"
             scrolling="no"
             className="pointer-events-none absolute inset-0 size-full border-0"
+            onLoad={(event) => {
+              const frameTimeMs = hasPlaybackFrames ? playbackState.frameElapsedMs : playheadMs;
+              event.currentTarget.contentWindow?.postMessage({ type: "motionweave:seek", timeMs: frameTimeMs }, "*");
+              event.currentTarget.contentWindow?.postMessage({ type: playing ? "motionweave:play" : "motionweave:pause" }, "*");
+            }}
             style={{
               opacity: transitionType === "crossfade" || transitionType === "fade" ? transitionProgress : 1,
             }}
@@ -619,14 +661,6 @@ export function VideoPreview({
           {audioError && <p className="mt-2 text-xs text-rose-100">旁白播放失败：{audioError}</p>}
         </div>
       )}
-
-      <button
-        aria-label={playing ? "暂停预览" : "播放预览"}
-        onClick={handleTogglePlayback}
-        className="absolute left-1/2 top-1/2 z-10 flex size-14 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-slate-900/55 text-white backdrop-blur transition hover:bg-[#1554ff]"
-      >
-        {playing ? <Pause size={26} fill="currentColor" /> : <Play size={26} fill="currentColor" />}
-      </button>
 
       <div className="absolute inset-x-5 bottom-4 z-10 flex items-center gap-3 text-white">
         <button type="button" aria-label={playing ? "暂停视频" : "播放视频"} onClick={handleTogglePlayback} className="rounded-full p-1 transition hover:bg-white/15">

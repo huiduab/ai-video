@@ -81,5 +81,6 @@ prisma/schema.prisma
 - 涉及 Agent 行为时先读 [docs/AGENT_SYSTEM.md](docs/AGENT_SYSTEM.md) 和 `src/lib/agent/`。
 - 涉及工作区 UI 时先读 [docs/FRONTEND_INDEX.md](docs/FRONTEND_INDEX.md) 和对应组件。
 - 新增重要设计决策时更新最贴近的索引文档；阶段性日志写入 [docs/DEVELOPMENT_LOG.md](docs/DEVELOPMENT_LOG.md)。
+- 前端任务结束前必须确认页面样式正常显示；如果发现页面无 Tailwind/全局样式、CSS 资源 404、stylesheet 规则为空或浏览器画面退回原生 HTML 样式，必须先修复并重新验证后才能结束任务。尤其是在运行 `npm run build` 后，如果本地 `next dev` 仍在运行，需要重启开发服务并刷新页面，避免 `.next` 被生产构建覆盖后导致 dev CSS 失效。
 - 清理无关代码、构建缓存或临时文件时，不要删除已经生成的项目素材；尤其不要清理 `public/generated/`、`public/generated/storyboards/` 下的图片、音频、HTML 动画等用户生成文件，除非用户明确要求删除这些生成结果。
 - 文档使用中文、UTF-8、Markdown；路径和命令使用代码格式。
