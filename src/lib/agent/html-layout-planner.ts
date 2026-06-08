@@ -136,15 +136,17 @@ async function planSingleSceneHtmlLayout({
   script,
   scene,
   htmlAnimationStyle,
+  signal,
 }: {
   script: VideoScriptResult;
   scene: VideoScriptScene;
   htmlAnimationStyle: AnimationStyle;
+  signal?: AbortSignal;
 }) {
   const raw = await callHtmlLayoutModel([
     { role: "system", content: buildHtmlLayoutSystemPrompt() },
     { role: "user", content: buildHtmlLayoutUserContent({ script, scene, htmlAnimationStyle }) },
-  ]);
+  ], { signal });
   const parsed = parseAgentJson(raw ?? "") as Partial<HtmlLayoutPlanResult>;
 
   if (typeof parsed.sceneIndex !== "number" || parsed.sceneIndex !== scene.index) {
@@ -176,10 +178,12 @@ export async function planHtmlAnimationLayouts({
   script,
   htmlAnimationStyle,
   concurrency = toPositiveInt(process.env.HTML_LAYOUT_CONCURRENCY, DEFAULT_HTML_LAYOUT_CONCURRENCY),
+  signal,
 }: {
   script: VideoScriptResult;
   htmlAnimationStyle: AnimationStyle;
   concurrency?: number;
+  signal?: AbortSignal;
 }) {
   if (script.mode !== "html-animation") {
     return script;
@@ -193,8 +197,12 @@ export async function planHtmlAnimationLayouts({
   });
 
   const plannedScenes = await mapWithConcurrency(script.scenes, concurrency, async (scene) => {
+    if (signal?.aborted) {
+      throw new Error("HTML layout planning aborted");
+    }
+
     try {
-      const plan = await planSingleSceneHtmlLayout({ script, scene, htmlAnimationStyle });
+      const plan = await planSingleSceneHtmlLayout({ script, scene, htmlAnimationStyle, signal });
 
       return {
         ...scene,
@@ -225,4 +233,64 @@ export async function planHtmlAnimationLayouts({
   });
 
   return plannedScript;
+}
+
+export async function planSingleHtmlAnimationLayoutInScript({
+  script,
+  sceneIndex,
+  htmlAnimationStyle,
+  signal,
+}: {
+  script: VideoScriptResult;
+  sceneIndex: number;
+  htmlAnimationStyle: AnimationStyle;
+  signal?: AbortSignal;
+}) {
+  if (script.mode !== "html-animation") {
+    return script;
+  }
+
+  const scene = script.scenes.find((item) => item.index === sceneIndex);
+
+  if (!scene) {
+    return script;
+  }
+
+  try {
+    const plan = await planSingleSceneHtmlLayout({ script, scene, htmlAnimationStyle, signal });
+    const nextScenes = script.scenes.map((item) =>
+      item.index === sceneIndex
+        ? {
+            ...item,
+            animationPrompt: typeof plan.animationPrompt === "string" && plan.animationPrompt.trim() ? plan.animationPrompt.trim() : item.animationPrompt,
+            htmlAnimation: plan.htmlAnimation ?? item.htmlAnimation,
+          }
+        : item,
+    );
+
+    return validateVideoScript({
+      ...script,
+      scenes: nextScenes,
+    });
+  } catch (error) {
+    console.error("[ai:html-layout:scene:fallback]", {
+      sceneIndex,
+      message: error instanceof Error ? error.message : String(error),
+    });
+
+    const nextScenes = script.scenes.map((item) => {
+      if (item.index !== sceneIndex) {
+        return item;
+      }
+
+      const fallbackScene = { ...item };
+      ensureHtmlAnimationDirectorDetail(fallbackScene);
+      return fallbackScene;
+    });
+
+    return validateVideoScript({
+      ...script,
+      scenes: nextScenes,
+    });
+  }
 }

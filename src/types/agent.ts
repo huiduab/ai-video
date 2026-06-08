@@ -39,6 +39,12 @@ export type AgentDisplay =
       type: "error";
       title: string;
       message: string;
+    }
+  | {
+      type: "confirmation";
+      title: string;
+      message: string;
+      action: "CONFIRM_REGENERATE_OUTLINE";
     };
 
 export interface AgentIntentResult {
@@ -49,10 +55,20 @@ export interface AgentIntentResult {
   payload: {
     outline?: string[];
     insertAfterSceneIndex?: number;
+    insertedSceneIndex?: number;
+    deletedSceneIndex?: number;
+    deletedSceneTitle?: string;
     sceneIndex?: number;
     sceneBrief?: string;
     rejectedReason?: string;
     generatedScript?: VideoScriptResult;
+    requiresConfirmation?: boolean;
+    pendingAction?: {
+      type: "CONFIRM_REGENERATE_OUTLINE";
+      userPrompt: string;
+      userMessageId: string;
+      activeStoryboardMessageId?: string;
+    };
   };
 }
 

@@ -61,6 +61,7 @@ ${roleDescription}
 8. 每个 visualPrompt${isHtmlAnimation ? " 和 animationPrompt" : ""} 都必须写入 styleConsistency 的核心内容；不能只写“保持一致”。
 9. 所有分镜必须共享同一套画风设定，只允许镜头内容、构图和动作变化，不允许改变画风、时代、材质、主色调或渲染方式。
 10. 如果用户消息中提供历史 memory，要参考已有上下文，但不要复制已经删除或被用户否定的内容。
+11. 如果用户消息中提供 regenerationContext，说明这是重新生成或局部修改已有大纲：必须同时参考 originalUserPrompt、currentStoryboardOutline 和 userModificationRequest；先判断哪些分镜需要修改、哪些可以保留，保留分镜要维持标题、旁白和画面意图稳定，修改分镜要更新旁白、画面提示词、HTML 动画基础提示或图片播放效果，并同步重写 transcript；即使用户只要求修改某个具体分镜、增加分镜或删除分镜，也必须最终返回修改后的完整脚本 JSON。
 ${modeRules}
 
 以下高级画面提示词标准必须严格附加到每个 visualPrompt${isHtmlAnimation ? " 和 animationPrompt" : ""} 的写作中，不能省略，不能被用户简短要求覆盖：

@@ -24,6 +24,7 @@ interface VideoPreviewProps {
   subtitlesVisible?: boolean;
   onSubtitlesVisibleChange?: (visible: boolean) => void;
   seekToMs?: number;
+  seekRequestKey?: number;
 }
 
 function clampProgress(value: number) {
@@ -242,6 +243,7 @@ export function VideoPreview({
   subtitlesVisible = true,
   onSubtitlesVisibleChange,
   seekToMs,
+  seekRequestKey = 0,
 }: VideoPreviewProps) {
   const [playing, setPlaying] = useState(false);
   const [playheadMs, setPlayheadMs] = useState(0);
@@ -252,7 +254,7 @@ export function VideoPreview({
   const previewRef = useRef<HTMLElement | null>(null);
   const startedAtRef = useRef(0);
   const pausedAtRef = useRef(0);
-  const lastExternalSeekRef = useRef<number | undefined>(undefined);
+  const lastExternalSeekRef = useRef<{ timeMs: number; requestKey: number } | null>(null);
   const previousFrameRef = useRef<StoryboardFrame | null>(null);
   const playbackAudioRef = useRef<HTMLAudioElement | null>(null);
   const playbackAudioFrameIdRef = useRef<string | null>(null);
@@ -361,18 +363,22 @@ export function VideoPreview({
   }, []);
 
   useEffect(() => {
-    if (typeof seekToMs !== "number" || seekToMs === lastExternalSeekRef.current) {
+    const previousSeek = lastExternalSeekRef.current;
+
+    if (typeof seekToMs !== "number" || (previousSeek?.timeMs === seekToMs && previousSeek.requestKey === seekRequestKey)) {
       return;
     }
 
     const nextMs = Math.min(Math.max(seekToMs, 0), totalDurationMs);
-    lastExternalSeekRef.current = seekToMs;
+    lastExternalSeekRef.current = { timeMs: seekToMs, requestKey: seekRequestKey };
+    previousFrameRef.current = null;
+    lastHtmlSyncRef.current = null;
     playbackAudioRef.current?.pause();
     setPlaying(false);
     setPlayheadMs(nextMs);
     pausedAtRef.current = nextMs;
     setSeekRevision((value) => value + 1);
-  }, [seekToMs, totalDurationMs]);
+  }, [seekRequestKey, seekToMs, totalDurationMs]);
 
   useEffect(() => {
     if (playbackAudioRef.current) {
@@ -453,6 +459,8 @@ export function VideoPreview({
 
   function handleSeek(nextMs: number, pause = false) {
     const boundedMs = Math.min(Math.max(nextMs, 0), totalDurationMs);
+    previousFrameRef.current = null;
+    lastHtmlSyncRef.current = null;
     setPlayheadMs(boundedMs);
     pausedAtRef.current = boundedMs;
     setSeekRevision((value) => value + 1);
@@ -521,6 +529,7 @@ export function VideoPreview({
     playbackState.previousFrame.id !== displayFrame?.id &&
     transitionType !== "cut" &&
     transitionProgress < 1;
+  const applyCurrentTransition = Boolean(previousVisible);
 
   return (
     <section
@@ -537,7 +546,7 @@ export function VideoPreview({
         <>
           {previousVisible && playbackState.previousFrame?.htmlUrl && (
             <iframe
-              key={`previous-html-${playbackState.previousFrame.id}`}
+              key={`previous-html-${playbackState.previousFrame.id}-${playbackState.previousFrame.htmlUrl}`}
               title={`${playbackState.previousFrame.title} HTML 动画`}
               src={playbackState.previousFrame.htmlUrl}
               data-motionweave-html="true"
@@ -550,7 +559,7 @@ export function VideoPreview({
             />
           )}
           <iframe
-            key={`html-${displayFrame?.id ?? "single"}-${seekRevision}`}
+            key={`html-${displayFrame?.id ?? "single"}-${displayHtmlUrl ?? ""}-${seekRevision}`}
             title={displayTitle ? `${displayTitle} HTML 动画` : "HTML 动画"}
             src={displayHtmlUrl ?? ""}
             data-motionweave-html="true"
@@ -563,7 +572,7 @@ export function VideoPreview({
               event.currentTarget.contentWindow?.postMessage({ type: playing ? "motionweave:play" : "motionweave:pause" }, "*");
             }}
             style={{
-              opacity: transitionType === "crossfade" || transitionType === "fade" ? transitionProgress : 1,
+              opacity: applyCurrentTransition && (transitionType === "crossfade" || transitionType === "fade") ? transitionProgress : 1,
             }}
           />
         </>
@@ -599,9 +608,9 @@ export function VideoPreview({
           <div
             className={cn("absolute inset-0 overflow-hidden", getTreatmentClass(displayFrame?.playbackEffect))}
             style={{
-              opacity: transitionType === "crossfade" || transitionType === "fade" ? transitionProgress : 1,
-              transform:
-                transitionType === "slide-left"
+              opacity: applyCurrentTransition && (transitionType === "crossfade" || transitionType === "fade") ? transitionProgress : 1,
+              transform: applyCurrentTransition
+                ? transitionType === "slide-left"
                   ? `translateX(${(1 - transitionProgress) * 100}%)`
                   : transitionType === "slide-right"
                     ? `translateX(${-(1 - transitionProgress) * 100}%)`
@@ -609,10 +618,11 @@ export function VideoPreview({
                       ? `translateY(${(1 - transitionProgress) * 100}%)`
                       : transitionType === "slide-down"
                         ? `translateY(${-(1 - transitionProgress) * 100}%)`
-                        : transitionType === "zoom-blur"
-                          ? `scale(${1.04 - transitionProgress * 0.04})`
-                          : undefined,
-              filter: transitionType === "zoom-blur" ? `blur(${(1 - transitionProgress) * 8}px)` : undefined,
+                      : transitionType === "zoom-blur"
+                        ? `scale(${1.04 - transitionProgress * 0.04})`
+                        : undefined
+                : undefined,
+              filter: applyCurrentTransition && transitionType === "zoom-blur" ? `blur(${(1 - transitionProgress) * 8}px)` : undefined,
             }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -623,8 +633,8 @@ export function VideoPreview({
               style={getImageStyle(displayFrame?.playbackEffect, playbackState.frameProgress)}
             />
           </div>
-          {transitionType === "dip-to-black" && <div className="absolute inset-0 bg-black" style={{ opacity: Math.sin(transitionProgress * Math.PI) }} />}
-          {transitionType === "dip-to-white" && <div className="absolute inset-0 bg-white" style={{ opacity: Math.sin(transitionProgress * Math.PI) }} />}
+          {applyCurrentTransition && transitionType === "dip-to-black" && <div className="absolute inset-0 bg-black" style={{ opacity: Math.sin(transitionProgress * Math.PI) }} />}
+          {applyCurrentTransition && transitionType === "dip-to-white" && <div className="absolute inset-0 bg-white" style={{ opacity: Math.sin(transitionProgress * Math.PI) }} />}
         </>
       ) : (
         <>

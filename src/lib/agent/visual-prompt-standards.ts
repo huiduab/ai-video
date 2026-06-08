@@ -14,6 +14,7 @@ export const IMAGE_PROMPT_APPENDIX = `
 - Use cohesive production design: intentional camera angle, controlled depth, refined materials, readable silhouette, balanced negative space.
 - Avoid generic stock-photo look, blurry details, low-resolution text, crowded labels, inconsistent style, distorted hands/faces, random UI artifacts.
 - If text appears, keep it minimal, large, legible, and compositionally integrated.
+- No watermark, no provider mark, no logo, no signature, no "AI generated" label, no corner badge, no embedded copyright text.
 `.trim();
 
 export const HTML_VISUAL_PROMPT_APPENDIX = `

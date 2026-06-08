@@ -14,7 +14,7 @@ interface ChatCompletionResponse {
   }>;
 }
 
-export async function callIntentModel(messages: ChatMessage[]) {
+export async function callIntentModel(messages: ChatMessage[], options?: { signal?: AbortSignal }) {
   const baseUrl = process.env.AI_BASE_URL;
   const apiKey = process.env.AI_API_KEY;
   const model = process.env.AI_MODEL || "gemini-3-flash-preview";
@@ -32,10 +32,11 @@ export async function callIntentModel(messages: ChatMessage[]) {
     temperature: 0.2,
     responseFormatJson: true,
     timeoutMs: toPositiveInt(process.env.AI_INTENT_REQUEST_TIMEOUT_MS, toPositiveInt(process.env.AI_REQUEST_TIMEOUT_MS, 30000)),
+    signal: options?.signal,
   });
 }
 
-export async function callDirectorModel(messages: ChatMessage[]) {
+export async function callDirectorModel(messages: ChatMessage[], options?: { signal?: AbortSignal }) {
   const baseUrl = process.env.DIRECTOR_API_BASE_URL || process.env.AI_DIRECTOR_BASE_URL || process.env.AI_BASE_URL;
   const apiKey = process.env.DIRECTOR_API_KEY || process.env.AI_DIRECTOR_API_KEY || process.env.AI_API_KEY;
   const model = process.env.DIRECTOR_MODEL || process.env.AI_DIRECTOR_MODEL || "deepseek-v4-pro";
@@ -53,10 +54,11 @@ export async function callDirectorModel(messages: ChatMessage[]) {
     temperature: 0.15,
     responseFormatJson: true,
     timeoutMs: toPositiveInt(process.env.DIRECTOR_REQUEST_TIMEOUT_MS, toPositiveInt(process.env.AI_REQUEST_TIMEOUT_MS, 90000)),
+    signal: options?.signal,
   });
 }
 
-export async function callHtmlLayoutModel(messages: ChatMessage[]) {
+export async function callHtmlLayoutModel(messages: ChatMessage[], options?: { signal?: AbortSignal }) {
   const baseUrl = process.env.HTML_LAYOUT_API_BASE_URL || process.env.DIRECTOR_API_BASE_URL || process.env.AI_DIRECTOR_BASE_URL || process.env.AI_BASE_URL;
   const apiKey = process.env.HTML_LAYOUT_API_KEY || process.env.DIRECTOR_API_KEY || process.env.AI_DIRECTOR_API_KEY || process.env.AI_API_KEY;
   const model = process.env.HTML_LAYOUT_MODEL || process.env.DIRECTOR_MODEL || process.env.AI_DIRECTOR_MODEL || "deepseek-v4-pro";
@@ -74,6 +76,7 @@ export async function callHtmlLayoutModel(messages: ChatMessage[]) {
     temperature: 0.2,
     responseFormatJson: true,
     timeoutMs: toPositiveInt(process.env.HTML_LAYOUT_REQUEST_TIMEOUT_MS, toPositiveInt(process.env.DIRECTOR_REQUEST_TIMEOUT_MS, toPositiveInt(process.env.AI_REQUEST_TIMEOUT_MS, 90000))),
+    signal: options?.signal,
   });
 }
 
@@ -95,6 +98,7 @@ async function callOpenAiCompatibleChat({
   temperature,
   responseFormatJson,
   timeoutMs,
+  signal,
 }: {
   stage: string;
   baseUrl: string;
@@ -104,6 +108,7 @@ async function callOpenAiCompatibleChat({
   temperature: number;
   responseFormatJson: boolean;
   timeoutMs: number;
+  signal?: AbortSignal;
 }) {
   const requestId = randomUUID();
   const startedAt = Date.now();
@@ -124,6 +129,13 @@ async function callOpenAiCompatibleChat({
   });
   const abortController = new AbortController();
   const timeout = setTimeout(() => abortController.abort(), timeoutMs);
+  const abortFromSignal = () => abortController.abort(signal?.reason);
+
+  if (signal?.aborted) {
+    abortController.abort(signal.reason);
+  } else {
+    signal?.addEventListener("abort", abortFromSignal, { once: true });
+  }
 
   let response: Response;
 
@@ -156,6 +168,7 @@ async function callOpenAiCompatibleChat({
     throw new Error(isAbort ? `AI request timed out after ${timeoutMs}ms` : `AI request failed: ${error instanceof Error ? error.message : String(error)}`);
   } finally {
     clearTimeout(timeout);
+    signal?.removeEventListener("abort", abortFromSignal);
   }
 
   if (!response.ok) {

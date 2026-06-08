@@ -185,6 +185,16 @@ function validateScene(value: unknown, fallbackIndex: number): VideoScriptScene 
   };
 }
 
+export function validateVideoScriptScene(value: unknown, fallbackIndex: number, mode: VideoScriptResult["mode"]) {
+  const scene = validateScene(value, fallbackIndex);
+
+  if (mode === "html-animation") {
+    validateHtmlAnimationDirectorDetail(scene);
+  }
+
+  return scene;
+}
+
 function optionalText(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }

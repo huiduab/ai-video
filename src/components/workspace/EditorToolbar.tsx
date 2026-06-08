@@ -1,14 +1,27 @@
 "use client";
 
-import { Captions, ChevronDown, Download, Music2 } from "lucide-react";
+import { Captions, ChevronDown, Download, Loader2, Music2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 interface EditorToolbarProps {
   captionsEnabled: boolean;
   onCaptionsEnabledChange: (enabled: boolean) => void;
+  exportDisabled?: boolean;
+  exporting?: boolean;
+  exportUrl?: string;
+  exportStatus?: string;
+  onExport?: () => void;
 }
 
-export function EditorToolbar({ captionsEnabled, onCaptionsEnabledChange }: EditorToolbarProps) {
+export function EditorToolbar({
+  captionsEnabled,
+  onCaptionsEnabledChange,
+  exportDisabled = false,
+  exporting = false,
+  exportUrl,
+  exportStatus,
+  onExport,
+}: EditorToolbarProps) {
   return (
     <div className="flex h-14 items-center gap-2 overflow-hidden border-b border-slate-200 bg-[#f7f9ff] px-3 py-2">
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
@@ -35,9 +48,25 @@ export function EditorToolbar({ captionsEnabled, onCaptionsEnabledChange }: Edit
       </div>
 
       <div className="ml-auto flex shrink-0 items-center gap-2">
-        <button className="flex h-10 items-center justify-center gap-1.5 rounded-lg bg-[#3868ff] px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-[#1554ff]">
-          <Download size={17} />
-          导出
+        {exportStatus ? <span className="hidden max-w-72 truncate text-xs text-slate-600 md:inline">{exportStatus}</span> : null}
+        {exportUrl ? (
+          <a
+            href={exportUrl}
+            download
+            className="flex h-10 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 shadow-sm transition hover:border-[#1554ff] hover:text-[#1554ff]"
+          >
+            <Download size={17} />
+            下载 MP4
+          </a>
+        ) : null}
+        <button
+          type="button"
+          onClick={onExport}
+          disabled={exportDisabled || exporting}
+          className="flex h-10 items-center justify-center gap-1.5 rounded-lg bg-[#3868ff] px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-[#1554ff] disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          {exporting ? <Loader2 size={17} className="animate-spin" /> : <Download size={17} />}
+          {exporting ? "导出中" : "导出 MP4"}
         </button>
       </div>
     </div>

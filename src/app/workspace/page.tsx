@@ -9,6 +9,14 @@ import { ProjectSidebar } from "@/components/workspace/ProjectSidebar";
 import { WorkspaceHeader } from "@/components/workspace/WorkspaceHeader";
 import type { ProjectItem, ProjectMode } from "@/types/project";
 
+async function readJsonResponse<T>(response: Response, fallbackMessage: string): Promise<T & { error?: string }> {
+  try {
+    return (await response.json()) as T & { error?: string };
+  } catch {
+    return { error: fallbackMessage } as T & { error?: string };
+  }
+}
+
 function WorkspaceContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -17,6 +25,7 @@ function WorkspaceContent() {
   const [selectedProject, setSelectedProject] = useState<ProjectItem | null>(null);
   const [activeMode, setActiveMode] = useState<ProjectMode>("slideshow");
   const [storyboardRefreshKey, setStoryboardRefreshKey] = useState(0);
+  const [videoGenerationRequestKey, setVideoGenerationRequestKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -28,7 +37,7 @@ function WorkspaceContent() {
 
     try {
       const response = await fetch("/api/projects?limit=50", { cache: "no-store" });
-      const payload = (await response.json()) as { items?: ProjectItem[]; error?: string };
+      const payload = await readJsonResponse<{ items?: ProjectItem[] }>(response, "项目列表响应为空或格式错误，请刷新重试");
 
       if (!response.ok || !payload.items) {
         throw new Error(payload.error ?? "项目列表加载失败");
@@ -116,11 +125,12 @@ function WorkspaceContent() {
         activeMode={activeMode}
         projectId={selectedProject.id}
         storyboardRefreshKey={storyboardRefreshKey}
+        videoGenerationRequestKey={videoGenerationRequestKey}
         onProjectsChange={loadProjects}
         onDurationChange={handleDurationChange}
       />
     );
-  }, [activeMode, error, handleDurationChange, loadProjects, loading, selectedProject, storyboardRefreshKey]);
+  }, [activeMode, error, handleDurationChange, loadProjects, loading, selectedProject, storyboardRefreshKey, videoGenerationRequestKey]);
 
   return (
     <div className="flex h-screen min-w-[1080px] flex-col overflow-hidden bg-[#f7f9ff] text-[14px]">
@@ -136,6 +146,7 @@ function WorkspaceContent() {
         {content}
         <AssistantPanel
           projectId={selectedProject?.id ?? ""}
+          onStartVideoGeneration={() => setVideoGenerationRequestKey((key) => key + 1)}
           onStoryboardChange={() => {
             setStoryboardRefreshKey((key) => key + 1);
             void loadProjects();

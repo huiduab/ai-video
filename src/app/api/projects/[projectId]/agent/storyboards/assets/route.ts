@@ -21,48 +21,143 @@ interface RouteContext {
   params: Promise<{ projectId: string }>;
 }
 
-type EvolinkTaskStatus = "pending" | "processing" | "completed" | "failed";
-
-interface EvolinkGenerationTask {
-  created?: number;
-  id: string;
-  model?: string;
-  object?: string;
-  progress?: number;
-  results?: string[];
-  status: EvolinkTaskStatus;
-  error?: {
-    code?: string;
-    message?: string;
-    type?: string;
-  };
-  task_info?: {
-    can_cancel?: boolean;
-    estimated_time?: number;
-  };
-  type?: string;
-  usage?: unknown;
+interface SceneRevisionContext {
+  userModificationRequest?: string;
+  originalVisualPrompt?: string;
+  originalHtmlIssueSummary?: string;
+  revisedVisualPrompt?: string;
 }
 
-const defaultEvolinkBaseUrl = "https://api.evolink.ai/v1";
-const defaultImageModel = "z-image-turbo";
-const defaultImageSize = "16:9";
-const defaultPollIntervalMs = 3000;
-const defaultPollTimeoutMs = 120000;
+interface ImageGenerationResult {
+  imageUrl?: string;
+  imageBase64?: string;
+  contentType?: string;
+  providerResponse: unknown;
+}
+
+const defaultImageModel = "gpt-image-1";
+const defaultImageSize = "1536x1024";
+const seedream5ImageSize = "2560x1440";
+const imageGenerationMinPixels = 3_686_400;
 const defaultTtsModel = "qwen3-tts-flash";
 const defaultTtsVoice = "Neil";
 const defaultTtsFormat = "mp3";
-const defaultHtmlAnimationModel = "gemini-3-flash-preview";
+const defaultHtmlAnimationModel = "deepseek-v4-pro";
+const imageGenerationMaxAttempts = 3;
+const imageGenerationRetryDelayMs = 1200;
 
-function getEvolinkConfig() {
+function getDefaultImageSizeForModel(model: string) {
+  const normalizedModel = model.toLowerCase();
+
+  if (normalizedModel.startsWith("gpt-image-")) {
+    return defaultImageSize;
+  }
+
+  if (normalizedModel === "dall-e-3") {
+    return "1792x1024";
+  }
+
+  if (normalizedModel === "dall-e-2") {
+    return "1024x1024";
+  }
+
+  return normalizedModel.includes("seedream-5-0") ? seedream5ImageSize : "2560x1440";
+}
+
+function getImageGenerationConfig() {
+  const model = process.env.IMAGE_MODEL ?? defaultImageModel;
+  const requestedSize = process.env.IMAGE_SIZE ?? getDefaultImageSizeForModel(model);
+
   return {
-    apiKey: process.env.EVOLINK_API_KEY ?? "",
-    baseUrl: (process.env.EVOLINK_BASE_URL ?? defaultEvolinkBaseUrl).trim().replace(/\/$/, ""),
-    model: process.env.EVOLINK_IMAGE_MODEL ?? defaultImageModel,
-    size: process.env.EVOLINK_IMAGE_SIZE ?? defaultImageSize,
-    pollIntervalMs: toPositiveInt(process.env.EVOLINK_IMAGE_POLL_INTERVAL_MS, defaultPollIntervalMs),
-    pollTimeoutMs: toPositiveInt(process.env.EVOLINK_IMAGE_POLL_TIMEOUT_MS, defaultPollTimeoutMs),
+    apiKey: process.env.IMAGE_API_KEY ?? process.env.AI_API_KEY ?? "",
+    baseUrl: (process.env.IMAGE_API_BASE_URL ?? process.env.AI_BASE_URL ?? "").trim().replace(/\/$/, ""),
+    model,
+    size: normalizeImageGenerationSize(requestedSize, model),
+    requestedSize,
   };
+}
+
+function normalizeImageGenerationSize(size: string, model: string) {
+  const trimmedSize = size.trim();
+  const normalizedModel = model.toLowerCase();
+
+  if (normalizedModel.startsWith("gpt-image-")) {
+    return ["1024x1024", "1024x1536", "1536x1024"].includes(trimmedSize) ? trimmedSize : defaultImageSize;
+  }
+
+  if (normalizedModel === "dall-e-3") {
+    return ["1024x1024", "1024x1792", "1792x1024"].includes(trimmedSize) ? trimmedSize : "1792x1024";
+  }
+
+  if (normalizedModel === "dall-e-2") {
+    return ["256x256", "512x512", "1024x1024"].includes(trimmedSize) ? trimmedSize : "1024x1024";
+  }
+
+  const ratioMatch = trimmedSize.match(/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/);
+
+  if (ratioMatch) {
+    const widthRatio = Number.parseFloat(ratioMatch[1]);
+    const heightRatio = Number.parseFloat(ratioMatch[2]);
+
+    if (Number.isFinite(widthRatio) && Number.isFinite(heightRatio) && widthRatio > 0 && heightRatio > 0) {
+      const scale = Math.sqrt(imageGenerationMinPixels / (widthRatio * heightRatio));
+      return `${Math.ceil((widthRatio * scale) / 2) * 2}x${Math.ceil((heightRatio * scale) / 2) * 2}`;
+    }
+  }
+
+  const dimensionMatch = trimmedSize.match(/^(\d+)x(\d+)$/i);
+
+  if (!dimensionMatch) {
+    return trimmedSize;
+  }
+
+  const width = Number.parseInt(dimensionMatch[1], 10);
+  const height = Number.parseInt(dimensionMatch[2], 10);
+  const pixels = width * height;
+
+  if (pixels >= imageGenerationMinPixels) {
+    return `${width}x${height}`;
+  }
+
+  const ratio = width / height;
+
+  if (Math.abs(ratio - 16 / 9) < 0.06) {
+    return seedream5ImageSize;
+  }
+
+  const scale = Math.sqrt(imageGenerationMinPixels / pixels);
+  return `${Math.ceil((width * scale) / 2) * 2}x${Math.ceil((height * scale) / 2) * 2}`;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getErrorCauseCode(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return "";
+  }
+
+  const cause = (error as { cause?: unknown }).cause;
+
+  if (!cause || typeof cause !== "object") {
+    return "";
+  }
+
+  const code = (cause as { code?: unknown }).code;
+  return typeof code === "string" ? code : "";
+}
+
+function isRetryableImageGenerationError(error: unknown) {
+  if (error instanceof TypeError && error.message === "fetch failed") {
+    return true;
+  }
+
+  return ["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EAI_AGAIN"].includes(getErrorCauseCode(error));
+}
+
+function isRetryableImageGenerationStatus(status: number) {
+  return status === 429 || status >= 500;
 }
 
 function getTtsConfig() {
@@ -81,7 +176,7 @@ function getHtmlAnimationConfig() {
   return {
     apiKey: process.env.HTML_API_KEY ?? process.env.AI_HTML_ANIMATION_API_KEY ?? process.env.AI_API_KEY ?? "",
     baseUrl: (process.env.HTML_API_BASE_URL ?? process.env.AI_HTML_ANIMATION_BASE_URL ?? process.env.AI_BASE_URL ?? "").trim().replace(/\/$/, ""),
-    model: process.env.HTML_MODEL ?? process.env.AI_HTML_ANIMATION_MODEL ?? process.env.AI_MODEL ?? defaultHtmlAnimationModel,
+    model: process.env.HTML_MODEL ?? process.env.AI_HTML_ANIMATION_MODEL ?? defaultHtmlAnimationModel,
   };
 }
 
@@ -187,21 +282,46 @@ function buildStyleConsistencyPrompt(style: VideoScriptResult["styleConsistency"
   }
 
   return [
-    "全片统一画风约束，必须严格保持一致：",
-    `视觉风格：${style.visualStyle}`,
-    `色彩方案：${style.colorPalette}`,
-    `光线方案：${style.lighting}`,
-    `镜头语言：${style.cameraLanguage}`,
-    style.characterDesign ? `角色/主体设计：${style.characterDesign}` : "",
-    `渲染规则：${style.renderingRules}`,
+    "Global visual consistency constraints:",
+    `Visual style: ${style.visualStyle}`,
+    `Color palette: ${style.colorPalette}`,
+    `Lighting: ${style.lighting}`,
+    `Camera language: ${style.cameraLanguage}`,
+    style.characterDesign ? `Character or subject design: ${style.characterDesign}` : "",
+    `Rendering rules: ${style.renderingRules}`,
   ]
     .filter(Boolean)
     .join("\n");
 }
 
-function buildImagePrompt(scene: VideoScriptResult["scenes"][number], style?: VideoScriptResult["styleConsistency"]) {
+function normalizeSceneRevisionContext(value: unknown): SceneRevisionContext | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const item = value as Record<string, unknown>;
+
+  return {
+    userModificationRequest: typeof item.userModificationRequest === "string" ? item.userModificationRequest : undefined,
+    originalVisualPrompt: typeof item.originalVisualPrompt === "string" ? item.originalVisualPrompt : undefined,
+    originalHtmlIssueSummary: typeof item.originalHtmlIssueSummary === "string" ? item.originalHtmlIssueSummary : undefined,
+    revisedVisualPrompt: typeof item.revisedVisualPrompt === "string" ? item.revisedVisualPrompt : undefined,
+  };
+}
+
+function buildImagePrompt(scene: VideoScriptResult["scenes"][number], style?: VideoScriptResult["styleConsistency"], revisionContext?: SceneRevisionContext) {
   return [
     buildStyleConsistencyPrompt(style),
+    revisionContext
+      ? [
+          "Single-scene regeneration context:",
+          `User change request: ${revisionContext.userModificationRequest ?? ""}`,
+          `Original visual prompt: ${revisionContext.originalVisualPrompt ?? ""}`,
+          `Previous HTML issue summary: ${revisionContext.originalHtmlIssueSummary ?? ""}`,
+          `Revised visual prompt: ${revisionContext.revisedVisualPrompt ?? ""}`,
+          "Only redraw the current scene. Do not change other scenes.",
+        ].join("\n")
+      : "",
     scene.visualPrompt,
     IMAGE_PROMPT_APPENDIX,
     "16:9 cinematic storyboard frame, high quality, clean composition, consistent art direction across all scenes",
@@ -214,39 +334,22 @@ function buildHtmlAnimationSystemPrompt() {
   const strictVisualPromptAppendix = buildStrictVisualPromptAppendix("html-animation");
 
   return `
-你是一个网页动画工程设计师。
-你必须只返回一个合法 JSON 对象，不能使用 Markdown，不能添加解释文字。
+You are a web animation engineer. Return only one valid JSON object: { "html": "<!doctype html>..." }.
+Build one self-contained 16:9 HTML animation for the current scene.
+Rules:
+1. Include complete doctype/html/head/style/body/script markup inside the html string.
+2. Use local HTML/CSS/SVG/JS/Canvas. The only allowed external resource is GSAP CDN.
+3. Do not use remote fonts, remote images, fetch, parent/window.top, localStorage, cookies, alert, prompt, or confirm.
+4. Do not render the full narration. Use short labels, keywords, diagrams, and annotations.
+5. Keep the bottom 18% free for external subtitles and player controls.
+6. Follow styleConsistency, htmlAnimationStyleRule, htmlAnimationTemplate, htmlAnimationPatterns, currentScene.htmlAnimation, and strictVisualPromptAppendix.
+7. If previousSceneContext or nextSceneContext is provided, use only its style summary, color hint, motion rhythm, and transition intent. Do not expect full neighboring HTML source.
+8. Use fixed 16:9 stage layout with overflow hidden and a clear .mw-stage root.
+9. Keep key elements from overlapping in final and intermediate animation states.
+10. Implement motionweave:play, motionweave:pause, and motionweave:seek message listeners when possible.
+11. currentScene.htmlAnimation.htmlPrompt is the primary execution brief. Do not mix other scene stories into this scene.
 
-任务：为单个视频分镜生成一个可本地保存、可在 iframe 中播放的完整单文件 HTML 动画。
-
-硬性要求：
-0. 响应格式红线：最终响应必须是一个 JSON 对象，且第一个非空字符必须是左花括号，最后一个非空字符必须是右花括号。JSON 只能有一个顶层字段 html。绝对禁止在 JSON 外输出 doctype、html 标签、Markdown 代码块或解释文字。错误示例：doctype 后面再包 JSON、Markdown html 代码块、裸 html 文档。正确示例：{ "html": "<!doctype html><html>...</html>" }。
-1. 返回 JSON 格式为 { "html": "<!doctype html>..." }。
-2. html 必须包含完整 <!doctype html>、html、head、style、body 和必要 script。
-3. 使用 HTML、CSS、SVG、JavaScript、Canvas 中合适的技术实现网页动画展示。
-4. 画布必须是 16:9，自适应容器。唯一允许的外部资源是 GSAP CDN 脚本；禁止远程字体、远程图片、其他远程脚本、fetch 请求或其他 CDN。
-5. 代码应自动播放动画，动画时长贴合分镜 durationMs；可以循环，但首次播放必须完整表达该分镜。
-6. 字幕和旁白由外层播放器负责，不要在 HTML 内重复展示旁白全文。
-7. 严格保持 styleConsistency 里的画风、颜色变量、材质、光影、镜头语言、主体设计和动效节奏。
-8. 如果提供 previousSceneHtml 或 nextSceneHtml，必须参考它们的变量命名、DOM 层级、色彩、元素质感和运动节奏；previousSceneHtml 用于承接上一个分镜，nextSceneHtml 用于预留过渡到下一个分镜。
-9. 代码不得访问 parent/window.top，不得发起网络请求，不得使用 alert、prompt、confirm、localStorage、cookie。
-10. 用 CSS 变量集中定义主题色、背景、光影和动效参数，便于后续局部重生成时保持前后一致。
-11. 如果会话中提供 htmlAnimationStyleRule，必须把 htmlAnimationStyleRule.prompt 作为最高优先级风格约束。
-12. 如果会话中提供 htmlAnimationStyleExample，必须参考示例 HTML 的视觉语言、CSS 技法、DOM 组织和动效节奏；不要照抄示例文字内容。
-13. 如果会话中提供 htmlAnimationTemplate，必须优先使用该模板的 layoutRules、motionRules 和 safeAreaRules，不要临时改成无关版式。
-14. 页面必须包含明确舞台容器，例如 .mw-stage，且 html/body/.mw-stage 都必须 width: 100%; height: 100%; margin: 0; overflow: hidden。
-15. 布局必须划分 title-zone、main-zone、accent-zone 或等价区域；主体图形放在中部安全区，不允许普通文档流自然堆叠导致元素交错。
-16. HTML 内只展示短关键词、节点标签和图形注释，不展示旁白全文；底部 18% 作为外层字幕和播放器安全区。
-17. 文本必须使用 clamp()、max-width、line-height 和 overflow-wrap 控制，超长文本要换行或缩短，禁止小字密集堆叠。
-18. 每个分镜至少有 3 个动态层：主标题或关键词、主体图形、辅助强调元素；主体图形必须解释概念，不能只做大字淡入。
-19. CSS 动画必须默认自动播放，同时实现 window message 控制协议：接收 { type: "motionweave:play" }、{ type: "motionweave:pause" }、{ type: "motionweave:seek", timeMs } 时尽量播放、暂停或跳转动画时间线；如果无法精确 seek，也要安全忽略。
-20. 关键 SVG 线条、箭头和数据流必须用 viewBox 坐标和 path 实现，不要用多个随机 div 拼线条。
-21. 必须把用户需求、styleConsistency、htmlAnimationTemplate、htmlAnimationPatterns、currentScene.htmlAnimation 和 strictVisualPromptAppendix 作为“严格附加规则”同时执行；不能只满足其中一部分。
-22. 生成 HTML 之前先在内部完成版式检查：核心元素不得进入底部 18% 字幕区，文本不得相互覆盖，主体图形不得超出 viewport，不能出现滚动条。
-23. 可以使用 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>，但如果使用 GSAP，必须在脚本中提供 CSS keyframes 或 Web Animations API 兜底，避免 CDN 不可用时画面完全静止。
-24. currentScene.htmlAnimation.htmlPrompt 是导演 AI 已经压缩好的单镜头执行提示词，必须优先执行；不要把其他分镜的剧情混入当前镜头。
-
-严格附加的高级画面提示词标准：
+Strict visual prompt appendix:
 ${strictVisualPromptAppendix}
 `;
 }
@@ -256,7 +359,7 @@ function buildHtmlAnimationTemplateMessage(template: HtmlAnimationTemplate) {
     role: "user" as const,
     content: JSON.stringify({
       messageType: "htmlAnimationTemplate",
-      instruction: "本分镜 HTML 必须优先采用这个动画模板。模板用于约束版式、安全区和运动套路，避免自由排版导致交错。",
+      instruction: "Use this template for layout, safe areas, and motion rules.",
       htmlAnimationTemplate: template,
     }),
   };
@@ -267,8 +370,7 @@ function buildHtmlAnimationResponseContractMessage() {
     role: "user" as const,
     content: JSON.stringify({
       messageType: "htmlAnimationResponseContract",
-      instruction:
-        "最终输出必须严格遵守响应格式契约。只返回一个 JSON 对象，不要返回裸 HTML，不要返回 Markdown，不要返回解释文字，不要把 JSON 包在 <!doctype html> 后面。",
+      instruction: "Return exactly one JSON object. Do not return raw HTML, Markdown, or explanation text.",
       requiredShape: {
         html: "<!doctype html><html><head><style>...</style></head><body><main class=\"mw-stage\">...</main></body></html>",
       },
@@ -278,7 +380,7 @@ function buildHtmlAnimationResponseContractMessage() {
         "<html>...</html>",
         "{ \"code\": \"...\" }",
       ],
-      finalCheck: "发送前确认：响应第一个非空字符是 {，顶层只有 html 字段，html 字段值才以 <!doctype html> 开头。",
+      finalCheck: "Before sending, confirm the first non-whitespace character is { and the only top-level field is html.",
     }),
   };
 }
@@ -289,7 +391,7 @@ function buildHtmlAnimationStyleMessages(style: AnimationStyle, exampleHtml: str
       role: "user" as const,
       content: JSON.stringify({
         messageType: "htmlAnimationStyleRule",
-        instruction: "后续单分镜 HTML 动画生成必须优先遵循这个风格提示词。",
+        instruction: "Follow this animation style rule first.",
         htmlAnimationStyleRule: {
           id: style.id,
           name: style.name,
@@ -302,8 +404,7 @@ function buildHtmlAnimationStyleMessages(style: AnimationStyle, exampleHtml: str
       role: "user" as const,
       content: JSON.stringify({
         messageType: "htmlAnimationStyleExample",
-        instruction:
-          "这是当前风格对应的示例 HTML，仅用于参考视觉语言、CSS 技法、DOM 组织和动效节奏。它不是最终输出格式示例；不要照抄示例文本内容，不要原样返回示例 HTML，最终响应仍必须是 { \"html\": \"<!doctype html>...\" } JSON 对象。",
+        instruction: "This is a style example for visual language only. Do not copy its text or return it as the final HTML.",
         styleId: style.id,
         htmlAnimationStyleExample: exampleHtml,
       }),
@@ -311,22 +412,40 @@ function buildHtmlAnimationStyleMessages(style: AnimationStyle, exampleHtml: str
   ];
 }
 
+function buildNeighborSceneContext(scene: VideoScriptResult["scenes"][number] | undefined, relation: "previous" | "next") {
+  if (!scene) {
+    return null;
+  }
+
+  return {
+    relation,
+    index: scene.index,
+    title: scene.title,
+    visualStyleSummary: scene.htmlAnimation?.visualMetaphor ?? scene.visualPrompt,
+    colorAndTextureHint: scene.animationPrompt ?? scene.visualPrompt,
+    motionRhythm: scene.htmlAnimation?.motionBeats?.map((beat) => beat.action).join(" -> ") ?? scene.htmlAnimation?.directorPrompt ?? "",
+    transitionIntent: scene.htmlAnimation?.transitionIntent ?? "",
+  };
+}
+
 function buildHtmlAnimationUserContent({
   script,
   sceneIndex,
   htmlAnimationStyle,
+  revisionContext,
 }: {
   script: VideoScriptResult;
   sceneIndex: number;
   htmlAnimationStyle: AnimationStyle;
+  revisionContext?: SceneRevisionContext;
 }) {
   const scene = script.scenes.find((item) => item.index === sceneIndex);
   const template = scene ? chooseHtmlAnimationTemplate(scene) : chooseHtmlAnimationTemplate({ index: sceneIndex, title: "", narration: "", visualPrompt: "" });
   const patternAddendum = scene
     ? buildHtmlAnimationPatternAddendum(`${script.title} ${script.summary} ${scene.title} ${scene.narration} ${scene.visualPrompt} ${scene.animationPrompt ?? ""}`)
     : buildHtmlAnimationPatternAddendum(`${script.title} ${script.summary}`);
-  const previousScene = [...script.scenes].reverse().find((item) => item.index < sceneIndex && item.generation?.html?.code);
-  const nextScene = script.scenes.find((item) => item.index > sceneIndex && item.generation?.html?.code);
+  const previousScene = [...script.scenes].reverse().find((item) => item.index < sceneIndex);
+  const nextScene = script.scenes.find((item) => item.index > sceneIndex);
 
   return JSON.stringify({
     mode: "html-animation",
@@ -354,6 +473,16 @@ function buildHtmlAnimationUserContent({
           durationMs: scene.durationMs,
         }
       : null,
+    sceneRevisionContext: revisionContext
+      ? {
+          instruction:
+            "Single-scene HTML regeneration. Apply the user change visibly in this scene only. The old HTML source is not provided; use the issue summary only to avoid repeating layout defects.",
+          userModificationRequest: revisionContext.userModificationRequest,
+          originalVisualPrompt: revisionContext.originalVisualPrompt,
+          originalHtmlIssueSummary: revisionContext.originalHtmlIssueSummary,
+          revisedVisualPrompt: revisionContext.revisedVisualPrompt,
+        }
+      : null,
     htmlAnimationTemplate: template,
     htmlAnimationPatterns: patternAddendum,
     strictVisualPromptAppendix: buildStrictVisualPromptAppendix("html-animation"),
@@ -364,20 +493,10 @@ function buildHtmlAnimationUserContent({
       motion: "Follow currentScene.htmlAnimation.motionBeats when present. Keep a clear focus path and at least three animated layers.",
       playbackProtocol: "Implement safe postMessage listeners for motionweave:play, motionweave:pause and motionweave:seek.",
     },
-    previousSceneHtml: previousScene
-      ? {
-          label: `前一个已生成分镜：${previousScene.index} ${previousScene.title}`,
-          code: previousScene.generation?.html?.code,
-        }
-      : null,
-    nextSceneHtml: nextScene
-      ? {
-          label: `后一个已生成分镜：${nextScene.index} ${nextScene.title}`,
-          code: nextScene.generation?.html?.code,
-        }
-      : null,
+    previousSceneContext: buildNeighborSceneContext(previousScene, "previous"),
+    nextSceneContext: buildNeighborSceneContext(nextScene, "next"),
     output: {
-      html: "返回完整单文件 HTML 字符串",
+      html: "Return a complete single-file HTML string",
     },
   });
 }
@@ -525,6 +644,7 @@ async function callHtmlAnimationModel({
   sceneIndex,
   htmlAnimationStyle,
   htmlAnimationStyleExample,
+  revisionContext,
 }: {
   baseUrl: string;
   apiKey: string;
@@ -533,6 +653,7 @@ async function callHtmlAnimationModel({
   sceneIndex: number;
   htmlAnimationStyle: AnimationStyle;
   htmlAnimationStyleExample: string;
+  revisionContext?: SceneRevisionContext;
 }) {
   const scene = script.scenes.find((item) => item.index === sceneIndex);
   const template = scene ? chooseHtmlAnimationTemplate(scene) : chooseHtmlAnimationTemplate({ index: sceneIndex, title: "", narration: "", visualPrompt: "" });
@@ -546,7 +667,7 @@ async function callHtmlAnimationModel({
       ...buildHtmlAnimationStyleMessages(htmlAnimationStyle, htmlAnimationStyleExample),
       buildHtmlAnimationTemplateMessage(template),
       buildHtmlAnimationResponseContractMessage(),
-      { role: "user", content: buildHtmlAnimationUserContent({ script, sceneIndex, htmlAnimationStyle }) },
+      { role: "user", content: buildHtmlAnimationUserContent({ script, sceneIndex, htmlAnimationStyle, revisionContext }) },
     ],
   };
 
@@ -588,7 +709,7 @@ async function callHtmlAnimationModel({
         body: payload,
       },
     });
-    throw new Error(extractEvolinkError(payload, `HTML animation request failed: ${response.status}`));
+    throw new Error(extractOpenAiCompatibleError(payload, `HTML animation request failed: ${response.status}`));
   }
 
   const content = payload.choices?.[0]?.message?.content;
@@ -602,8 +723,9 @@ async function callHtmlAnimationModel({
     baseUrl,
     payload: {
       sceneIndex,
-      content,
-      normalizedHtml: html,
+      contentPreview: typeof content === "string" ? content.slice(0, 4000) : content,
+      contentChars: typeof content === "string" ? content.length : 0,
+      normalizedHtmlChars: html.length,
     },
   });
 
@@ -619,7 +741,7 @@ async function loadProjectHtmlAnimationStyle(projectId: string) {
   return getHtmlAnimationStyleFromMetadata(project?.metadata);
 }
 
-async function submitEvolinkImageTask({
+async function callOpenAiCompatibleImageGeneration({
   baseUrl,
   apiKey,
   model,
@@ -631,86 +753,63 @@ async function submitEvolinkImageTask({
   model: string;
   prompt: string;
   size: string;
-}) {
-  const response = await fetch(`${baseUrl}/images/generations`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      prompt,
-      size,
-      nsfw_check: false,
-    }),
-  });
-  const payload = (await response.json().catch(() => ({}))) as Partial<EvolinkGenerationTask> & { error?: unknown };
+}): Promise<ImageGenerationResult> {
+  let response: Response | null = null;
+  let lastError: unknown = null;
 
-  if (!response.ok || typeof payload.id !== "string") {
-    throw new Error(extractEvolinkError(payload, `Evolink image task submit failed: ${response.status}`));
-  }
+  for (let attempt = 1; attempt <= imageGenerationMaxAttempts; attempt++) {
+    try {
+      response = await fetch(`${baseUrl}/images/generations`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          prompt,
+          size,
+        }),
+      });
 
-  return payload as EvolinkGenerationTask;
-}
+      if (response.ok || attempt >= imageGenerationMaxAttempts || !isRetryableImageGenerationStatus(response.status)) {
+        break;
+      }
 
-async function getEvolinkTask({
-  baseUrl,
-  apiKey,
-  taskId,
-}: {
-  baseUrl: string;
-  apiKey: string;
-  taskId: string;
-}) {
-  const response = await fetch(`${baseUrl}/tasks/${encodeURIComponent(taskId)}`, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-    cache: "no-store",
-  });
-  const payload = (await response.json().catch(() => ({}))) as Partial<EvolinkGenerationTask>;
+      await sleep(imageGenerationRetryDelayMs * attempt);
+      break;
+    } catch (error) {
+      lastError = error;
 
-  if (!response.ok || typeof payload.status !== "string") {
-    throw new Error(extractEvolinkError(payload, `Evolink task query failed: ${response.status}`));
-  }
+      if (attempt >= imageGenerationMaxAttempts || !isRetryableImageGenerationError(error)) {
+        break;
+      }
 
-  return payload as EvolinkGenerationTask;
-}
-
-async function pollEvolinkTask({
-  baseUrl,
-  apiKey,
-  taskId,
-  intervalMs,
-  timeoutMs,
-  onProgress,
-}: {
-  baseUrl: string;
-  apiKey: string;
-  taskId: string;
-  intervalMs: number;
-  timeoutMs: number;
-  onProgress: (task: EvolinkGenerationTask) => Promise<void>;
-}) {
-  const deadline = Date.now() + timeoutMs;
-
-  while (Date.now() < deadline) {
-    const task = await getEvolinkTask({ baseUrl, apiKey, taskId });
-    await onProgress(task);
-
-    if (task.status === "completed") {
-      return task;
+      await sleep(imageGenerationRetryDelayMs * attempt);
     }
-
-    if (task.status === "failed") {
-      throw new Error(task.error?.message ?? "Evolink image task failed");
-    }
-
-    await sleep(intervalMs);
   }
 
-  throw new Error(`Evolink image task timed out after ${Math.round(timeoutMs / 1000)}s`);
+  if (!response) {
+    const code = getErrorCauseCode(lastError);
+    throw new Error(`图片生成服务连接失败${code ? `（${code}）` : ""}，请稍后重试或检查 IMAGE_API_BASE_URL 网络连通性`);
+  }
+
+  const payload = (await response.json().catch(() => ({}))) as unknown;
+
+  if (!response.ok) {
+    throw new Error(extractOpenAiCompatibleError(payload, `Image generation request failed: ${response.status}`));
+  }
+
+  const parsed = parseImageGenerationPayload(payload);
+
+  if (!parsed.imageUrl && !parsed.imageBase64) {
+    throw new Error("Image generation response did not contain image url or b64_json");
+  }
+
+  return {
+    ...parsed,
+    providerResponse: payload,
+  };
 }
 
 async function saveRemoteImage({
@@ -731,6 +830,43 @@ async function saveRemoteImage({
   const contentType = response.headers.get("content-type") ?? "image/png";
   const bytes = Buffer.from(await response.arrayBuffer());
   const extension = extensionFromContentType(contentType) ?? extensionFromUrl(imageUrl) ?? "png";
+  const fileName = `scene-${sceneIndex}-${Date.now()}-${randomUUID()}.${extension}`;
+  const relativePath = `/generated/storyboards/${projectId}/${fileName}`;
+  const outputDir = path.join(process.cwd(), "public", "generated", "storyboards", projectId);
+  const outputPath = path.join(outputDir, fileName);
+
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(outputPath, bytes);
+
+  return {
+    contentType,
+    fileName,
+    sizeBytes: bytes.byteLength,
+    storageKey: path.join("public", "generated", "storyboards", projectId, fileName).replace(/\\/g, "/"),
+    url: relativePath,
+  };
+}
+
+async function saveGeneratedImage({
+  result,
+  projectId,
+  sceneIndex,
+}: {
+  result: ImageGenerationResult;
+  projectId: string;
+  sceneIndex: number;
+}) {
+  if (result.imageUrl) {
+    return saveRemoteImage({ imageUrl: result.imageUrl, projectId, sceneIndex });
+  }
+
+  if (!result.imageBase64) {
+    throw new Error("Generated image result is empty");
+  }
+
+  const bytes = Buffer.from(result.imageBase64, "base64");
+  const contentType = result.contentType ?? "image/png";
+  const extension = extensionFromContentType(contentType) ?? "png";
   const fileName = `scene-${sceneIndex}-${Date.now()}-${randomUUID()}.${extension}`;
   const relativePath = `/generated/storyboards/${projectId}/${fileName}`;
   const outputDir = path.join(process.cwd(), "public", "generated", "storyboards", projectId);
@@ -979,7 +1115,7 @@ async function extractResponseError(response: Response, fallback: string) {
   const contentType = response.headers.get("content-type") ?? "";
 
   if (contentType.includes("application/json")) {
-    return extractEvolinkError(await response.json().catch(() => ({})), fallback);
+    return extractOpenAiCompatibleError(await response.json().catch(() => ({})), fallback);
   }
 
   const text = await response.text().catch(() => "");
@@ -1058,7 +1194,48 @@ function ensureUsableAudioResult(bytes: Buffer, contentType: string, providerRes
   };
 }
 
-function extractEvolinkError(payload: unknown, fallback: string) {
+function parseImageGenerationPayload(payload: unknown) {
+  const objectPayload = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+  const data = Array.isArray(objectPayload.data) ? objectPayload.data : [];
+  const firstItem = data[0] && typeof data[0] === "object" ? (data[0] as Record<string, unknown>) : {};
+  const image = objectPayload.image && typeof objectPayload.image === "object" ? (objectPayload.image as Record<string, unknown>) : {};
+  const output = objectPayload.output && typeof objectPayload.output === "object" ? (objectPayload.output as Record<string, unknown>) : {};
+  const outputImage = output.image && typeof output.image === "object" ? (output.image as Record<string, unknown>) : {};
+  const imageUrl =
+    typeof firstItem.url === "string"
+      ? firstItem.url
+      : typeof image.url === "string"
+        ? image.url
+        : typeof outputImage.url === "string"
+          ? outputImage.url
+          : undefined;
+  const imageBase64 =
+    typeof firstItem.b64_json === "string"
+      ? firstItem.b64_json
+      : typeof firstItem.data === "string"
+        ? firstItem.data
+        : typeof image.b64_json === "string"
+          ? image.b64_json
+          : typeof outputImage.b64_json === "string"
+            ? outputImage.b64_json
+            : undefined;
+  const contentType =
+    typeof firstItem.mime_type === "string"
+      ? firstItem.mime_type
+      : typeof image.mime_type === "string"
+        ? image.mime_type
+        : typeof outputImage.mime_type === "string"
+          ? outputImage.mime_type
+          : undefined;
+
+  return {
+    imageUrl,
+    imageBase64,
+    contentType,
+  };
+}
+
+function extractOpenAiCompatibleError(payload: unknown, fallback: string) {
   if (!payload || typeof payload !== "object") {
     return fallback;
   }
@@ -1071,10 +1248,6 @@ function extractEvolinkError(payload: unknown, fallback: string) {
   }
 
   return fallback;
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function generatedPublicUrlExists(url: string | undefined, minSizeBytes = 1) {
@@ -1128,7 +1301,7 @@ async function normalizeMissingGeneratedAssets(script: VideoScriptResult) {
                   ...image,
                   status: "failed" as const,
                   url: undefined,
-                  error: "本地图片文件不存在，请重新生成",
+                  error: "Local generated file is missing. Please regenerate.",
                 }
               : image,
           html:
@@ -1137,7 +1310,7 @@ async function normalizeMissingGeneratedAssets(script: VideoScriptResult) {
                   ...html,
                   status: "failed" as const,
                   url: undefined,
-                  error: "本地 HTML 文件不存在，请重新生成",
+                  error: "Local generated file is missing. Please regenerate.",
                 }
               : html,
           audio:
@@ -1146,7 +1319,7 @@ async function normalizeMissingGeneratedAssets(script: VideoScriptResult) {
                   ...audio,
                   status: "failed" as const,
                   url: undefined,
-                  error: "本地音频文件不存在，请重新生成",
+                  error: "Local generated file is missing. Please regenerate.",
                 }
               : audio,
         },
@@ -1169,11 +1342,13 @@ export async function POST(request: Request, context: RouteContext) {
       sceneIndex?: unknown;
       kind?: unknown;
       force?: unknown;
+      revisionContext?: unknown;
     };
     const messageId = typeof body.messageId === "string" ? body.messageId : "";
     const sceneIndex = typeof body.sceneIndex === "number" ? body.sceneIndex : 0;
     const kind = typeof body.kind === "string" ? body.kind : "image";
     const force = body.force === true;
+    const revisionContext = normalizeSceneRevisionContext(body.revisionContext);
 
     if (!messageId || sceneIndex <= 0) {
       return NextResponse.json({ error: "Message id and scene index are required" }, { status: 400 });
@@ -1423,7 +1598,7 @@ export async function POST(request: Request, context: RouteContext) {
           status: TaskStatus.RUNNING,
           progress: 10,
           startedAt: new Date(),
-          input: {
+          input: toInputJson({
             provider: "ai-html-animation",
             baseUrl: config.baseUrl,
             model: config.model,
@@ -1433,7 +1608,8 @@ export async function POST(request: Request, context: RouteContext) {
             sourcePrompt: scene.animationPrompt ?? scene.visualPrompt,
             hasPreviousSceneHtml: Boolean([...script.scenes].reverse().find((item) => item.index < sceneIndex && item.generation?.html?.code)),
             hasNextSceneHtml: Boolean(script.scenes.find((item) => item.index > sceneIndex && item.generation?.html?.code)),
-          },
+            revisionContext,
+          }),
         },
       });
 
@@ -1448,6 +1624,7 @@ export async function POST(request: Request, context: RouteContext) {
           sceneIndex,
           htmlAnimationStyle,
           htmlAnimationStyleExample,
+          revisionContext,
         });
         const savedHtml = await saveHtmlFile({ html, projectId, sceneIndex });
         const asset = await prisma.asset.create({
@@ -1581,13 +1758,13 @@ export async function POST(request: Request, context: RouteContext) {
       }
     }
 
-    const config = getEvolinkConfig();
+    const config = getImageGenerationConfig();
 
-    if (!config.apiKey) {
-      return NextResponse.json({ error: "EVOLINK_API_KEY is required for image generation" }, { status: 500 });
+    if (!config.baseUrl || !config.apiKey) {
+      return NextResponse.json({ error: "IMAGE_API_BASE_URL and IMAGE_API_KEY are required for image generation" }, { status: 500 });
     }
 
-    const prompt = buildImagePrompt(scene, script.styleConsistency);
+    const prompt = buildImagePrompt(scene, script.styleConsistency, revisionContext);
     const task = await prisma.generationTask.create({
       data: {
         projectId,
@@ -1595,68 +1772,45 @@ export async function POST(request: Request, context: RouteContext) {
         status: TaskStatus.RUNNING,
         progress: 5,
         startedAt: new Date(),
-        input: {
-          provider: "evolink",
+        input: toInputJson({
+          provider: "openai-compatible-image",
           baseUrl: config.baseUrl,
           model: config.model,
+          requestedSize: config.requestedSize,
           size: config.size,
           messageId,
           sceneIndex,
           kind: "image",
           prompt,
           sourcePrompt: scene.visualPrompt,
-        },
+          revisionContext,
+        }),
       },
     });
 
     try {
-      const submittedTask = await submitEvolinkImageTask({
+      const generatedImage = await callOpenAiCompatibleImageGeneration({
         baseUrl: config.baseUrl,
         apiKey: config.apiKey,
         model: config.model,
         prompt,
         size: config.size,
       });
+      const savedImage = await saveGeneratedImage({ result: generatedImage, projectId, sceneIndex });
 
       await prisma.generationTask.update({
         where: { id: task.id },
         data: {
-          progress: submittedTask.progress ?? 10,
+          progress: 80,
           output: toInputJson({
-            provider: "evolink",
-            externalTaskId: submittedTask.id,
-            submitResponse: submittedTask,
+            provider: "openai-compatible-image",
+            responseMode: generatedImage.imageUrl ? "url" : "base64",
+            response: generatedImage.providerResponse,
+            localUrl: savedImage.url,
+            storageKey: savedImage.storageKey,
           }),
         },
       });
-
-      const completedTask = await pollEvolinkTask({
-        baseUrl: config.baseUrl,
-        apiKey: config.apiKey,
-        taskId: submittedTask.id,
-        intervalMs: config.pollIntervalMs,
-        timeoutMs: config.pollTimeoutMs,
-        onProgress: async (currentTask) => {
-          await prisma.generationTask.update({
-            where: { id: task.id },
-            data: {
-              progress: currentTask.progress ?? 10,
-              output: toInputJson({
-                provider: "evolink",
-                externalTaskId: submittedTask.id,
-                latestStatus: currentTask,
-              }),
-            },
-          });
-        },
-      });
-      const remoteImageUrl = completedTask.results?.[0];
-
-      if (!remoteImageUrl) {
-        throw new Error("Evolink task completed without image result");
-      }
-
-      const savedImage = await saveRemoteImage({ imageUrl: remoteImageUrl, projectId, sceneIndex });
       const asset = await prisma.asset.create({
         data: {
           projectId,
@@ -1666,17 +1820,18 @@ export async function POST(request: Request, context: RouteContext) {
           mimeType: savedImage.contentType,
           sizeBytes: BigInt(savedImage.sizeBytes),
           metadata: toInputJson({
-            provider: "evolink",
+            provider: "openai-compatible-image",
             model: config.model,
+            requestedSize: config.requestedSize,
             size: config.size,
             messageId,
             sceneIndex,
             prompt,
             sourcePrompt: scene.visualPrompt,
-            externalTaskId: submittedTask.id,
-            remoteUrl: remoteImageUrl,
+            remoteUrl: generatedImage.imageUrl,
             fileName: savedImage.fileName,
-            completedTask,
+            responseMode: generatedImage.imageUrl ? "url" : "base64",
+            providerResponse: generatedImage.providerResponse,
           }),
         },
       });
@@ -1721,13 +1876,12 @@ export async function POST(request: Request, context: RouteContext) {
             progress: 100,
             finishedAt: new Date(),
             output: toInputJson({
-              provider: "evolink",
-              externalTaskId: submittedTask.id,
+              provider: "openai-compatible-image",
               assetId: asset.id,
               localUrl: savedImage.url,
               storageKey: savedImage.storageKey,
-              remoteUrl: remoteImageUrl,
-              completedTask,
+              remoteUrl: generatedImage.imageUrl,
+              responseMode: generatedImage.imageUrl ? "url" : "base64",
             }),
           },
         }),
@@ -1741,7 +1895,6 @@ export async function POST(request: Request, context: RouteContext) {
         asset: imageState,
         task: {
           id: task.id,
-          externalTaskId: submittedTask.id,
           progress: 100,
           status: "succeeded",
         },

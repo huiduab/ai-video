@@ -46,7 +46,7 @@ export const HTML_ANIMATION_PATTERNS: HtmlAnimationPattern[] = [
     name: "版式安全约束",
     triggerHints: [],
     promptAddendum:
-      "所有布局必须使用明确区域和稳定尺寸：title-zone、main-zone、accent-zone、caption-safe-zone；禁止普通文档流自然堆叠复杂元素，禁止小字、溢出、交错、滚动条。",
+      "所有布局必须使用明确区域和稳定尺寸：title-zone、main-zone、accent-zone、caption-safe-zone；主体节点使用固定坐标布局，关键节点在最终状态和动画中间状态都不得重叠；装饰层和复合图形内部可以重叠，但不能遮挡关键文字、节点、公式或标签；不要在 SVG <g> 上使用 transform 动画，不要在同一元素上混用 inline transform、CSS transform 和 GSAP transform；移动动画使用外层固定占位、内层 opacity/translate 的结构；三栏、输入-处理-输出和流程图类画面优先使用 HTML div absolute 定位或纯 SVG 固定坐标；坐标系、辅助图、标签必须放在独立区域，不能侵入主流程节点区域；禁止普通文档流自然堆叠复杂元素，禁止小字、溢出、交错、滚动条。",
   },
 ];
 

@@ -16,6 +16,7 @@ interface StoryboardTimelineProps {
   projectId: string;
   mode: ProjectMode;
   refreshKey?: number;
+  videoGenerationRequestKey?: number;
   onActiveFrameChange?: (frame: StoryboardFrame | null, storyboard: GeneratedStoryboardOption | null, frames: StoryboardFrame[]) => void;
   onProjectsChange?: () => void;
   onDurationChange?: (durationMs: number) => void;
@@ -191,6 +192,8 @@ function sceneToFrame(
   const audioUrl = scene.generation?.audio?.url;
   const durationMs = audioUrl ? audioDurationByUrl[audioUrl] ?? getSceneDurationMs(scene) : getSceneDurationMs(scene);
   const isHtmlAnimation = mode === "html-animation";
+  const imageAsset = scene.generation?.image;
+  const htmlAsset = scene.generation?.html;
 
   return {
     id: `generated-scene-${scene.index}`,
@@ -199,12 +202,12 @@ function sceneToFrame(
     startMs,
     durationMs,
     holdAfterMs,
-    thumbnailUrl: isHtmlAnimation ? null : scene.generation?.image?.url ?? null,
-    imageUrl: scene.generation?.image?.url,
-    htmlUrl: scene.generation?.html?.url,
+    thumbnailUrl: isHtmlAnimation ? null : imageAsset?.url ?? null,
+    imageUrl: isHtmlAnimation ? undefined : imageAsset?.url,
+    htmlUrl: isHtmlAnimation ? htmlAsset?.url : undefined,
     audioUrl,
-    imageStatus: scene.generation?.image?.status ?? "idle",
-    htmlStatus: scene.generation?.html?.status ?? "idle",
+    imageStatus: isHtmlAnimation ? undefined : imageAsset?.status ?? "idle",
+    htmlStatus: isHtmlAnimation ? htmlAsset?.status ?? "idle" : undefined,
     audioStatus: scene.generation?.audio?.status ?? "idle",
     prompt: isHtmlAnimation ? scene.animationPrompt ?? scene.visualPrompt : scene.visualPrompt,
     narration: scene.narration,
@@ -212,7 +215,7 @@ function sceneToFrame(
     visualConfig: {
       generated: true,
       visualPrompt: scene.visualPrompt,
-      image: scene.generation?.image,
+      image: imageAsset,
     },
     animationConfig: {
       generated: true,
@@ -237,7 +240,7 @@ function storyboardToFrames(storyboard: GeneratedStoryboardOption | null, audioD
   });
 }
 
-export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFrameChange, onProjectsChange, onDurationChange }: StoryboardTimelineProps) {
+export function StoryboardTimeline({ projectId, mode, refreshKey = 0, videoGenerationRequestKey = 0, onActiveFrameChange, onProjectsChange, onDurationChange }: StoryboardTimelineProps) {
   const [storyboards, setStoryboards] = useState<GeneratedStoryboardOption[]>([]);
   const [activeMessageId, setActiveMessageId] = useState("");
   const [selectedId, setSelectedId] = useState("");
@@ -250,6 +253,7 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
   const [generationStatus, setGenerationStatus] = useState("");
   const [detailOpen, setDetailOpen] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const handledVideoGenerationRequestRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const activeStoryboard = useMemo(
@@ -462,6 +466,8 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
     setError("");
 
     try {
+      const visualErrors: string[] = [];
+
       for (const scene of visualPendingScenes) {
         if (controller.signal.aborted) {
           break;
@@ -505,7 +511,29 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
         };
 
         if (!response.ok || !payload.scene) {
-          throw new Error(payload.error ?? (mode === "html-animation" ? "HTML 动画生成失败" : "分镜画面生成失败"));
+          const errorMessage = payload.error ?? (mode === "html-animation" ? "HTML 动画生成失败" : "分镜画面生成失败");
+          visualErrors.push(`第 ${scene.index} 个分镜画面失败：${errorMessage}`);
+          patchSceneGenerationState(
+            scene.index,
+            mode === "html-animation"
+              ? {
+                  html: {
+                    status: "failed",
+                    prompt: currentScene.animationPrompt ?? currentScene.visualPrompt,
+                    error: errorMessage,
+                    generatedAt: new Date().toISOString(),
+                  },
+                }
+              : {
+                  image: {
+                    status: "failed",
+                    prompt: currentScene.visualPrompt,
+                    error: errorMessage,
+                    generatedAt: new Date().toISOString(),
+                  },
+                },
+          );
+          continue;
         }
 
         latestScenes = latestScenes.map((item) => (item.index === payload.scene!.index ? payload.scene! : item));
@@ -578,15 +606,15 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
           ? mode === "html-animation"
             ? "已中断生成，已完成的 HTML 动画和旁白会保留"
             : "已中断生成，已完成的画面和旁白会保留"
-          : audioErrors.length > 0
+          : visualErrors.length > 0 || audioErrors.length > 0
             ? mode === "html-animation"
-              ? `HTML 动画已生成，${audioErrors.length} 个旁白失败`
-              : `分镜画面已生成，${audioErrors.length} 个旁白失败`
+              ? `HTML 动画生成完成，${visualErrors.length} 个画面失败，${audioErrors.length} 个旁白失败`
+              : `分镜画面生成完成，${visualErrors.length} 个画面失败，${audioErrors.length} 个旁白失败`
           : mode === "html-animation"
             ? "HTML 动画和旁白生成完成"
             : "分镜画面和旁白生成完成",
       );
-      setError(audioErrors[0] ?? "");
+      setError(visualErrors[0] ?? audioErrors[0] ?? "");
       if (!controller.signal.aborted) {
         onProjectsChange?.();
       }
@@ -604,6 +632,15 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
       void loadGeneratedStoryboards();
     }
   }
+
+  useEffect(() => {
+    if (videoGenerationRequestKey <= 0 || handledVideoGenerationRequestRef.current === videoGenerationRequestKey) {
+      return;
+    }
+
+    handledVideoGenerationRequestRef.current = videoGenerationRequestKey;
+    void handleGenerateImages();
+  }, [videoGenerationRequestKey]);
 
   async function handleRegenerateSceneAsset(frame: StoryboardFrame, assetKind: "visual" | "audio") {
     if (!activeStoryboard || generating) {
@@ -848,6 +885,7 @@ export function StoryboardTimeline({ projectId, mode, refreshKey = 0, onActiveFr
               <div className="media-frame relative aspect-video overflow-hidden rounded-xl">
                 {selectedFrame.htmlUrl && mode === "html-animation" && (
                   <iframe
+                    key={`${selectedFrame.id}-${selectedFrame.htmlUrl}`}
                     title={`${selectedFrame.title} HTML 动画`}
                     src={selectedFrame.htmlUrl}
                     sandbox="allow-scripts"

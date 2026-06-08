@@ -50,17 +50,28 @@ AI_TTS_VOICE=Neil
 
 分镜旁白音频生成复用 `AI_BASE_URL` 和 `AI_API_KEY`，默认模型为 `qwen3-tts-flash`，音色由 `AI_TTS_VOICE` 控制。后端会将音频文件保存到本地项目素材目录，并把结果写回对应分镜的 `generation.audio`。
 
+图片轮播分镜图片生成使用独立的 OpenAI 兼容图片接口配置：
+
+```env
+IMAGE_API_BASE_URL=https://api.openai.com/v1
+IMAGE_API_KEY=your_openai_api_key
+IMAGE_MODEL=gpt-image-1
+IMAGE_SIZE=1536x1024
+```
+
+未配置 `IMAGE_API_BASE_URL` 或 `IMAGE_API_KEY` 时会分别回退到 `AI_BASE_URL` 和 `AI_API_KEY`。接口调用目标为 `{IMAGE_API_BASE_URL}/images/generations`，兼容 `data[0].url` 和 `data[0].b64_json`。默认使用 OpenAI 官方 `gpt-image-1` 和横版尺寸 `1536x1024`；`gpt-image-*`、`dall-e-3` 和 `dall-e-2` 会限制为 OpenAI 官方支持的尺寸，第三方模型才会把小尺寸或比例值按原比例放大到至少 `3686400` 像素，以满足 Seedream 5.0 等供应商通道的最小像素要求。
+
 ## POST 消息流程
 
 ```text
 user content
   -> save USER message
-  -> load project + storyboard context
-  -> load validated Agent memory
+  -> load project + lightweight storyboard context
   -> call intent model
   -> parseAgentJson
   -> validateAgentIntent
   -> if generate/regenerate outline:
+       load validated Agent memory
        call script model
        validateVideoScript
        attach generatedScript to intent payload
@@ -68,6 +79,22 @@ user content
   -> save ASSISTANT message
   -> return display data
 ```
+
+### 重新生成大纲确认流程
+
+- 当意图识别结果为 `REGENERATE_OUTLINE`、`ADD_SCENE`、`DELETE_SCENE` 或 `REGENERATE_SCENE` 时，后端会先读取当前 active 分镜版本。
+- 如果当前 active 脚本中任一分镜已经存在 `generation.image`、`generation.html` 或 `generation.audio` 的成功状态、URL 或 assetId，则 `REGENERATE_OUTLINE` 不会立即进入导演脚本生成，而是在意图分析完成后保存一条带 `payload.requiresConfirmation` 和 `payload.pendingAction.type = "CONFIRM_REGENERATE_OUTLINE"` 的助手确认消息。`ADD_SCENE`、`DELETE_SCENE` 和 `REGENERATE_SCENE` 是局部修改，不走整片覆盖确认。
+- 前端只在最新消息气泡 footer 显示“确认重新生成”按钮；后续出现新消息后旧确认按钮会隐藏。服务端也会校验确认消息必须是当前项目最新消息，防止过期确认被执行。
+- 用户点击确认后，前端再次 `POST /api/projects/[projectId]/agent/messages`，请求体包含 `action: "confirm-regenerate-outline"` 和 `confirmationMessageId`。后端会更新原确认消息为新的大纲结果，并把该消息设为 `activeGeneratedStoryboardMessageId`。
+- 如果当前 active 脚本还没有任何分镜画面、HTML 动画或旁白音频生成，则 `REGENERATE_OUTLINE` 会直接进入导演脚本生成。
+- 重新生成时传给导演模型的 `regenerationContext` 包含原始用户提示词、当前分镜大纲和用户新的修改需求。导演需要判断哪些分镜修改、哪些分镜保留；需要修改的分镜重写旁白和画面/动画提示词，不需要修改的分镜保持稳定，最终仍返回完整脚本 JSON 并覆盖当前 active 大纲。
+- `ADD_SCENE`、`DELETE_SCENE`、`REGENERATE_SCENE` 这类局部修改意图不再只返回“已分析”结果。`ADD_SCENE` 会调用单分镜新增导演并保留已有分镜素材；`REGENERATE_SCENE` 会调用单分镜修改导演；`DELETE_SCENE` 直接从当前 active 脚本移除目标分镜并重排剩余分镜编号，不调用导演模型重写全片。
+- `REGENERATE_SCENE` 的意图 JSON 必须在 `payload.sceneIndex` 返回用户要修改的分镜编号。后端收到该编号后，会调用单分镜导演请求；导演输入包含当前完整分镜摘要、目标分镜旧内容、前一个分镜、后一个分镜和本次修改需求，用于保证修改后与其它分镜的叙事、术语、节奏和转场贴合；不再传原始用户提示词，避免长旧需求干扰当前版本。
+- 单分镜导演只返回 `{ sceneIndex, scene }`，后端只把该 `scene` 合并到当前 active 脚本；其它分镜按当前 active 脚本原样保留，包括已有生成素材。HTML 动画模式下，单分镜导演会直接返回该镜的 `htmlAnimation.htmlPrompt` 等编排字段，不再额外调用一次 HTML 编排模型。
+- 单分镜导演和 HTML 执行模型都会把用户本次修改需求视为硬性增量要求。新分镜提示词必须明确写出新增/修改的可见元素、布局位置和动画方式；HTML 执行阶段不接收当前分镜完整旧 HTML 源码，而是接收后端从旧源码中提取的故障诊断摘要，例如 SVG `<g>` 上的 `transform`、CSS/GSAP 混用或关键节点容器被直接移动等风险，避免复刻旧画面或继承旧布局缺陷。
+- `REGENERATE_SCENE` 保存新脚本后会立即调用单分镜画面重生成占位函数，复用 `POST /agent/storyboards/assets` 并传入 `force: true`。图片轮播模式重生成 `kind: "image"`；HTML 动画模式重生成 `kind: "html"`。
+- 单分镜画面重生成上下文只包含用户本次修改需求、当前分镜原始画面意图、旧 HTML 故障诊断摘要和导演改写后的画面意图；不再把原始旁白或改写旁白传给素材执行模型。HTML 动画模式不会把当前分镜已有的 `generation.html.code` 完整源码传给执行模型，也不会再附带前后分镜的完整 HTML 源码；只传 `previousSceneContext`、`nextSceneContext` 这类轻量摘要，包含标题、视觉风格摘要、色彩/材质提示、运动节奏和转场意图。完成后助手消息气泡会更新为“已完成第 N 个分镜的内容修改，并重新生成该分镜画面”。HTML 执行阶段日志只记录响应预览和字符数，避免终端重复输出整段 HTML。
+- 前端停止当前生成/修改任务时会 abort 对 `POST /agent/messages` 的请求；后端会把 `request.signal` 继续传给意图、导演和 HTML 编排模型调用，尽量中断仍在等待的模型请求，避免停止后继续写入过时结果。
 
 ## 记忆策略
 
@@ -84,6 +111,17 @@ Agent 不记忆：
 - `confidence`。
 - 错误消息。
 - 被拒绝任务。
+
+## 意图识别上下文
+
+意图识别只负责分类和判断目标分镜编号，不接收完整历史脚本。`POST /agent/messages` 传给意图模型的上下文为：
+
+- 用户本次输入。
+- 项目标题、模式和时长。
+- 当前 active 生成脚本的轻量分镜索引；没有 active 生成脚本时回退到数据库分镜。
+- 每个分镜只包含 `index`、`title` 和最多 60 字的 `narrationBrief`。
+
+意图识别阶段不传 `styleConsistency`、`visualPrompt`、`animationPrompt`、`htmlAnimation` 或完整 Agent memory。只有进入导演生成阶段后，后端才加载完整已验证 memory 或目标分镜详细上下文。
 
 ## 生成分镜版本
 
@@ -119,9 +157,9 @@ HTML 动画模式下，脚本生成完成后会调用 `src/lib/agent/html-layout
 
 单分镜 HTML 生成时，后端会根据编排阶段写入的 `htmlAnimation.templateId` 和分镜内容选择模板规则，并把模板的 `layoutRules`、`motionRules` 和 `safeAreaRules` 注入模型请求。模板库维护在 `src/lib/html-animation-templates.ts`，用于约束数据流、分层结构、流程时间线、矩阵网格、3D 卡片、PPT 章节页等常见演示套路。
 
-生成某个 HTML 分镜时，后端会把当前 active 脚本里的统一画风、当前分镜提示词、前一个已生成分镜的 `generation.html.code` 和后一个已生成分镜的 `generation.html.code` 一并传给模型，并用 `previousSceneHtml`、`nextSceneHtml` 标注来源。顺序生成时通常只有前一个代码；后续局部重生成时如果前后分镜都已生成，接口会自动附带两侧代码，用于生成更平滑的过渡分镜。
+生成某个 HTML 分镜时，后端会把当前 active 脚本里的统一画风、当前分镜提示词和相邻分镜轻量上下文传给模型。相邻上下文使用 `previousSceneContext`、`nextSceneContext` 标注来源，只包含分镜编号、标题、视觉风格摘要、色彩/材质提示、运动节奏和转场意图，不再传前后分镜的 `generation.html.code` 完整源码，以降低单镜头 HTML 生成 token 成本。
 
-HTML 生成提示词会强制要求固定 16:9 舞台、标题区、主体区、辅助区和底部字幕/播放器安全区。保存前后端会向 HTML 注入 `motionweave-runtime-guard` 与 `motionweave-runtime-bridge`，兜底设置 `html/body` 和舞台容器为无滚动条布局，并提供 `motionweave:play`、`motionweave:pause`、`motionweave:seek` 的 `postMessage` 播放协议。
+HTML 生成提示词会强制要求固定 16:9 舞台、标题区、主体区、辅助区和底部字幕/播放器安全区。提示词同时包含布局稳定性硬规则：主体节点使用固定坐标布局，关键节点在最终状态和动画中间状态都不得重叠；装饰层和复合图形内部可以重叠，但不能遮挡关键文字、节点、公式或标签；禁止在 SVG `<g>` 上使用 `transform` 动画；禁止在同一元素上混用 inline `transform`、CSS `transform` 和 GSAP `transform`；移动动画应使用“外层固定占位 + 内层 opacity/translate”的结构；三栏、输入-处理-输出和流程图类画面优先使用 HTML absolute 定位或纯 SVG 固定坐标；坐标系、辅助图和标签必须放在独立区域，不能侵入主流程节点区域。这些规则目前是提示词约束，不包含浏览器端自动布局 QA。保存前后端会向 HTML 注入 `motionweave-runtime-guard` 与 `motionweave-runtime-bridge`，兜底设置 `html/body` 和舞台容器为无滚动条布局，并提供 `motionweave:play`、`motionweave:pause`、`motionweave:seek` 的 `postMessage` 播放协议。
 
 脚本生成和素材生成都会附加强制高级画面提示词标准，规则维护在 `src/lib/agent/visual-prompt-standards.ts`。该标准要求每个 `visualPrompt` 或 `animationPrompt` 都包含主体、构图、镜头、光线、材质、色彩、空间层次、细节密度和 negative constraints，避免低级、口语化或只写“大标题+背景”的提示词。HTML 动画还会附加 `src/lib/agent/html-animation-patterns.ts` 中的策略库，把数据流、分层结构、PPT 演示、3D 对象、动态关键词和版式安全规则作为严格附加规则传给模型。
 
@@ -132,6 +170,8 @@ HTML 动画生成完成后会执行基础静态 QA：禁止远程资源、`windo
 HTML 动画素材请求失败时，素材接口会把失败状态写回当前 active 脚本的 `scene.generation.html`，同时更新对应 `generation_tasks` 记录。这样用户刷新页面后仍能看到具体分镜处于 `failed` 状态和错误原因，后续再次点击 `AI 生成` 会按现有跳过规则继续补齐失败或未完成的素材。
 
 HTML 动画风格规则维护在 `src/config/html-animation-styles/styles.json`，示例 HTML 维护在 `public/html-animation-styles/`，`src/lib/html-animation-styles.ts` 只负责读取和校验配置。当前项目选择保存在 `Project.metadata.htmlAnimationStyleId`，缺省为 `minimalist-tech` 极简科技风；旧项目如果保存了已删除的风格 id，会自动回退到当前默认风格。当前可选风格为极简科技风、赛博终端黑客风、优雅学术纪录片、动力学完播风、数据杂志风和产品蓝图风。所有风格提示词都要求避免“单一大标题页”，需要包含标题、辅助信息、图形/数据/节点等多层内容，并把关键信息放在画面上方约 72% 区域，底部 18-22% 作为字幕安全区。生成脚本和生成单个 HTML 动画素材时，后端都会把所选风格拆成独立会话消息传给模型：一条 `htmlAnimationStyleRule` 风格提示词消息，一条 `htmlAnimationStyleExample` 示例 HTML 消息，再跟随实际生成请求。模型必须把风格提示词吸收进 `styleConsistency` 和每个 `animationPrompt`，并参考示例的视觉语言、CSS 技法、DOM 组织和动效节奏，保证后续重新生成仍然使用当前项目风格。
+
+图片轮播模式不展示 HTML 动画风格 UI，也不会向脚本生成、生图或旁白生成请求传入 `htmlAnimationStyle`、风格示例 HTML 或 `htmlAnimationStyleId`。
 
 图片轮播模式下，模型还必须为每个分镜生成 `playbackEffect`，播放器会按该 JSON 执行画面运动和转场：
 
@@ -223,3 +263,19 @@ AI_CONVERSATION_LOG_MAX_CHARS=20000
 - `html-animation`：Gemini Flash 单镜头 HTML 请求、响应和错误。
 
 日志是一行一个 JSON 记录，包含 `timestamp`、`requestId`、`stage`、`event`、`model`、`baseUrl` 和 `payload`。日志工具会隐藏 `apiKey`、`authorization`、`token`、`secret`、`password` 等敏感字段，但 prompt 和模型响应本身会被写入本地文件；不要把该日志提交或分享给第三方。
+
+## 2026-06-06 新增分镜局部流程
+
+- `ADD_SCENE` 的意图识别必须返回 `payload.insertAfterSceneIndex`。用户明确指定“第 N 个分镜后”时返回 `N`；用户未指定位置或只说“新增一个分镜”时返回 `0`。
+- 当 `insertAfterSceneIndex` 为 `0` 时，后端会在单分镜导演请求中传入当前视频逐字稿、已有分镜大纲和用户新增需求，由导演模型返回建议插入位置 `insertAfterSceneIndex` 与单个新分镜。
+- 新增分镜导演只返回 `{ insertAfterSceneIndex, scene }`，后端把该分镜插入当前 active `generatedScript.scenes`，并重新整理所有 `scene.index` 为连续编号；其它已有分镜的标题、旁白、画面提示词和生成素材状态会保留。
+- 保存新的 active 分镜版本后，后端会内部调用 `POST /agent/storyboards/assets` 为新增分镜生成画面或 HTML 动画，再生成该分镜旁白音频。
+- 助手消息气泡会在完成后更新为“已完成第 N 个新增分镜，并生成该分镜的画面和声音”；如果素材生成失败，会保留已插入的大纲并在气泡中提示失败原因。
+
+## 2026-06-06 删除分镜局部流程
+
+- `DELETE_SCENE` 的意图识别必须返回 `payload.sceneIndex`。用户明确指定“删除第 N 个分镜”时返回 `N`；用户说“删除最后一镜、开头镜头或某个标题附近的分镜”时，只根据轻量 `storyboard.scenes` 换算目标编号；无法确定时返回 `0`。
+- 后端收到 `DELETE_SCENE` 后不会调用导演模型重写全片，也不会触发整片覆盖确认。它只读取当前 active `generatedScript`，删除目标分镜，并把剩余 `scenes[].index` 重排为连续编号。
+- 删除后会重建 `generatedScript.transcript`，保留剩余分镜的标题、旁白、画面提示词、`htmlAnimation`、`playbackEffect` 和 `generation.image/html/audio` 状态。
+- 被删除分镜的历史素材文件和 `assets` 记录不会清理，避免误删用户生成内容；它们只是不再被当前 active 大纲引用。
+- 如果目标编号不存在、当前没有 active 分镜版本，或当前大纲只有 1 个分镜，接口返回删除失败气泡，不保存新的 active 大纲。

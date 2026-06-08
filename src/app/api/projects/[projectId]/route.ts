@@ -59,18 +59,22 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (body.htmlAnimationStyleId !== undefined) {
       const currentProject = await prisma.project.findFirst({
         where: { id: projectId, deletedAt: null },
-        select: { metadata: true },
+        select: { metadata: true, mode: true },
       });
 
       if (!currentProject) {
         return NextResponse.json({ error: "Project not found" }, { status: 404 });
       }
 
-      const base = currentProject.metadata && typeof currentProject.metadata === "object" && !Array.isArray(currentProject.metadata) ? currentProject.metadata : {};
-      data.metadata = {
-        ...base,
-        htmlAnimationStyleId: getHtmlAnimationStyle(body.htmlAnimationStyleId).id,
-      } as Prisma.InputJsonValue;
+      const targetMode = data.mode ?? currentProject.mode;
+
+      if (targetMode === "HTML_ANIMATION") {
+        const base = currentProject.metadata && typeof currentProject.metadata === "object" && !Array.isArray(currentProject.metadata) ? currentProject.metadata : {};
+        data.metadata = {
+          ...base,
+          htmlAnimationStyleId: getHtmlAnimationStyle(body.htmlAnimationStyleId).id,
+        } as Prisma.InputJsonValue;
+      }
     }
 
     const project = await prisma.project.update({

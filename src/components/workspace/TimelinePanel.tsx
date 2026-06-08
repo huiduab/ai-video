@@ -118,6 +118,7 @@ export function TimelinePanel({
                 )}
                 {item.htmlUrl && (
                   <iframe
+                    key={`${item.id}-${item.htmlUrl}`}
                     title={`${item.title} HTML 动画缩略图`}
                     src={item.htmlUrl}
                     sandbox="allow-scripts"

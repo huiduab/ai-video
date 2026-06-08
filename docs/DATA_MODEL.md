@@ -69,7 +69,7 @@
 
 - `url` 保存本地可访问路径，例如 `/generated/storyboards/{projectId}/scene-1-...png`。
 - `storageKey` 保存本地文件路径，例如 `public/generated/storyboards/{projectId}/scene-1-...png`。
-- `metadata` 保存 `provider: "evolink"`、`model`、`size`、`prompt`、`externalTaskId`、远端临时 URL 和完成任务响应。
+- `metadata` 保存 `provider: "openai-compatible-image"`、`model`、`size`、`prompt`、供应商响应、远端临时 URL（如有）和本地文件名。
 
 分镜旁白音频生成成功后：
 
@@ -93,10 +93,10 @@ HTML 动画分镜生成成功后：
 
 为后续长任务、渲染、导出保留。
 
-分镜生图时用于记录一次 Evolink 调用：
+分镜生图时用于记录一次 OpenAI 兼容图片生成调用：
 
 - `input` 保存 provider、模型、比例、分镜索引和最终 prompt。
-- `output` 保存外部 task id、轮询状态、本地文件信息和最终结果。
+- `output` 保存供应商响应模式、供应商响应摘要、本地文件信息和最终结果。
 - `status/progress/errorMessage` 反映当前生成状态。
 
 ### `AgentMessage`

@@ -2,6 +2,7 @@
 
 import {
   AlertTriangle,
+  CheckCircle2,
   FileText,
   Image,
   ListChecks,
@@ -10,6 +11,7 @@ import {
   Save,
   Send,
   Sparkles,
+  Square,
   Trash2,
   WandSparkles,
   X,
@@ -19,12 +21,18 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { ANIMATION_STYLES, getHtmlAnimationStyle, getDefaultHtmlAnimationStyle, type AnimationStyle } from "@/lib/html-animation-styles";
 import type { AgentDisplay, AgentMessageItem, VideoScriptResult, VideoScriptScene } from "@/types/agent";
-import type { ProjectItem } from "@/types/project";
+import type { ProjectItem, ProjectMode } from "@/types/project";
 
 const MIN_WIDTH = 280;
 const MAX_WIDTH = 520;
 const STYLE_PREVIEW_WIDTH = 1280;
 const STYLE_PREVIEW_HEIGHT = 720;
+const ASSISTANT_WAITING_STEPS = [
+  "导演正在修饰叙事细节",
+  "动画师正在编辑分镜提示词",
+  "画师正在会话中确认画面风格",
+  "剪辑师正在整理大纲表格",
+];
 
 function formatMessageTime(value: string) {
   const date = new Date(value);
@@ -40,13 +48,14 @@ function formatMessageTime(value: string) {
 interface AssistantPanelProps {
   projectId: string;
   onStoryboardChange?: () => void;
+  onStartVideoGeneration?: () => void;
 }
 
 type LocalAgentMessage = AgentMessageItem & {
   pending?: boolean;
 };
 
-export function AssistantPanel({ projectId, onStoryboardChange }: AssistantPanelProps) {
+export function AssistantPanel({ projectId, onStoryboardChange, onStartVideoGeneration }: AssistantPanelProps) {
   const [messages, setMessages] = useState<LocalAgentMessage[]>([]);
   const [scriptEditor, setScriptEditor] = useState<{ messageId: string; script: VideoScriptResult } | null>(null);
   const [input, setInput] = useState("");
@@ -54,11 +63,40 @@ export function AssistantPanel({ projectId, onStoryboardChange }: AssistantPanel
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [projectMode, setProjectMode] = useState<ProjectMode>("slideshow");
   const [stylePickerOpen, setStylePickerOpen] = useState(false);
   const [selectedStyle, setSelectedStyle] = useState<AnimationStyle>(getDefaultHtmlAnimationStyle());
   const [styleSaving, setStyleSaving] = useState(false);
+  const [confirmingMessageId, setConfirmingMessageId] = useState<string | null>(null);
+  const [activeTaskLabel, setActiveTaskLabel] = useState("");
   const resizeStart = useRef<{ x: number; width: number } | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const taskAbortRef = useRef<AbortController | null>(null);
+  const taskActive = sending || Boolean(confirmingMessageId);
+  const showHtmlStyleControls = projectMode === "html-animation";
+
+  function isStartVideoGenerationCommand(value: string) {
+    const normalized = value.replace(/\s+/g, "").replace(/[，。！？、,.!?]/g, "").toLowerCase();
+
+    if (!normalized) {
+      return false;
+    }
+
+    if (/(大纲|脚本|分镜|文案|逐字稿)/.test(normalized)) {
+      return false;
+    }
+
+    return [
+      "开始生成视频",
+      "生成视频",
+      "开始生成画面",
+      "开始生成素材",
+      "开始渲染视频",
+      "渲染视频",
+      "ai生成",
+      "开始ai生成",
+    ].some((command) => normalized.includes(command));
+  }
 
   const loadMessages = useCallback(async () => {
     if (!projectId) {
@@ -91,6 +129,7 @@ export function AssistantPanel({ projectId, onStoryboardChange }: AssistantPanel
 
   useEffect(() => {
     if (!projectId) {
+      setProjectMode("slideshow");
       setSelectedStyle(getDefaultHtmlAnimationStyle());
       setStylePickerOpen(false);
       return;
@@ -104,11 +143,20 @@ export function AssistantPanel({ projectId, onStoryboardChange }: AssistantPanel
         const payload = (await response.json().catch(() => ({}))) as { project?: ProjectItem; error?: string };
 
         if (!cancelled && response.ok && payload.project) {
-          setSelectedStyle(getHtmlAnimationStyle(payload.project.htmlAnimationStyleId));
+          setProjectMode(payload.project.mode);
+
+          if (payload.project.mode === "html-animation") {
+            setSelectedStyle(getHtmlAnimationStyle(payload.project.htmlAnimationStyleId));
+          } else {
+            setSelectedStyle(getDefaultHtmlAnimationStyle());
+            setStylePickerOpen(false);
+          }
         }
       } catch {
         if (!cancelled) {
+          setProjectMode("slideshow");
           setSelectedStyle(getDefaultHtmlAnimationStyle());
+          setStylePickerOpen(false);
         }
       }
     }
@@ -152,13 +200,63 @@ export function AssistantPanel({ projectId, onStoryboardChange }: AssistantPanel
     document.body.style.userSelect = "none";
   }
 
+  function stopActiveTask() {
+    taskAbortRef.current?.abort();
+    taskAbortRef.current = null;
+    setSending(false);
+    setConfirmingMessageId(null);
+    setActiveTaskLabel("");
+    setError("已停止当前修改任务。");
+    setMessages((current) => current.filter((message) => !message.pending));
+  }
+
   async function sendMessage() {
     const value = input.trim();
-    if (!value || sending || !projectId) return;
+    if (taskActive) {
+      stopActiveTask();
+      return;
+    }
+
+    if (!value || !projectId) return;
+
+    if (isStartVideoGenerationCommand(value)) {
+      const now = new Date().toISOString();
+      const userMessageId = `local-user-${Date.now()}`;
+      const assistantMessageId = `local-assistant-${Date.now()}`;
+
+      setInput("");
+      setError("");
+      setMessages((current) => [
+        ...current,
+        {
+          id: userMessageId,
+          role: "user",
+          content: value,
+          intentType: null,
+          intentJson: null,
+          display: null,
+          createdAt: now,
+        },
+        {
+          id: assistantMessageId,
+          role: "assistant",
+          content: "收到，已开始生成视频画面和旁白。这个操作等同于点击时间线里的“AI 生成”按钮。",
+          intentType: null,
+          intentJson: null,
+          display: null,
+          createdAt: now,
+        },
+      ]);
+      onStartVideoGeneration?.();
+      return;
+    }
 
     setSending(true);
+    setActiveTaskLabel("正在修改");
     setError("");
     setInput("");
+    const abortController = new AbortController();
+    taskAbortRef.current = abortController;
 
     const now = new Date().toISOString();
     const userMessageId = `local-user-${Date.now()}`;
@@ -190,6 +288,7 @@ export function AssistantPanel({ projectId, onStoryboardChange }: AssistantPanel
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: value }),
+        signal: abortController.signal,
       });
       const payload = (await response.json()) as {
         userMessage?: AgentMessageItem;
@@ -224,6 +323,10 @@ export function AssistantPanel({ projectId, onStoryboardChange }: AssistantPanel
         onStoryboardChange?.();
       }
     } catch (sendError) {
+      if (sendError instanceof Error && sendError.name === "AbortError") {
+        return;
+      }
+
       const message = sendError instanceof Error ? sendError.message : "消息发送失败";
       setError(message);
       setMessages((current) =>
@@ -243,12 +346,16 @@ export function AssistantPanel({ projectId, onStoryboardChange }: AssistantPanel
         ),
       );
     } finally {
+      if (taskAbortRef.current === abortController) {
+        taskAbortRef.current = null;
+      }
       setSending(false);
+      setActiveTaskLabel("");
     }
   }
 
   async function selectHtmlAnimationStyle(style: AnimationStyle) {
-    if (!projectId || styleSaving) {
+    if (!projectId || !showHtmlStyleControls || styleSaving) {
       return;
     }
 
@@ -276,9 +383,67 @@ export function AssistantPanel({ projectId, onStoryboardChange }: AssistantPanel
     }
   }
 
+  async function confirmRegenerateOutline(messageId: string) {
+    if (!projectId || taskActive) {
+      return;
+    }
+
+    setConfirmingMessageId(messageId);
+    setActiveTaskLabel("正在修改");
+    setError("");
+    const abortController = new AbortController();
+    taskAbortRef.current = abortController;
+
+    try {
+      const response = await fetch(`/api/projects/${projectId}/agent/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "confirm-regenerate-outline",
+          confirmationMessageId: messageId,
+        }),
+        signal: abortController.signal,
+      });
+      const payload = (await response.json()) as {
+        assistantMessage?: AgentMessageItem;
+        display?: AgentDisplay;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.assistantMessage) {
+        throw new Error(payload.error ?? "确认重新生成失败");
+      }
+
+      const assistantMessage = payload.display
+        ? { ...payload.assistantMessage, display: payload.display }
+        : payload.assistantMessage;
+
+      setMessages((current) => current.map((message) => (message.id === messageId ? assistantMessage : message)));
+
+      if (assistantMessage.intentJson?.payload.generatedScript) {
+        onStoryboardChange?.();
+      }
+    } catch (confirmError) {
+      if (confirmError instanceof Error && confirmError.name === "AbortError") {
+        return;
+      }
+
+      setError(confirmError instanceof Error ? confirmError.message : "确认重新生成失败");
+    } finally {
+      if (taskAbortRef.current === abortController) {
+        taskAbortRef.current = null;
+      }
+      setConfirmingMessageId(null);
+      setActiveTaskLabel("");
+    }
+  }
+
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
+      if (taskActive) {
+        return;
+      }
       void sendMessage();
     }
   }
@@ -321,8 +486,15 @@ export function AssistantPanel({ projectId, onStoryboardChange }: AssistantPanel
           <EmptyState title="开始创作" description="描述你想要的视频、分镜调整或大纲需求，AI 会先分析你的创作意图。" />
         )}
 
-        {messages.map((message) => (
-          <MessageBubble key={message.id} message={message} onOpenScript={(script) => setScriptEditor({ messageId: message.id, script })} />
+        {messages.map((message, index) => (
+          <MessageBubble
+            key={message.id}
+            message={message}
+            canConfirmAction={index === messages.length - 1 && !message.pending}
+            confirming={confirmingMessageId === message.id}
+            onConfirmRegenerate={() => void confirmRegenerateOutline(message.id)}
+            onOpenScript={(script) => setScriptEditor({ messageId: message.id, script })}
+          />
         ))}
 
         {error && (
@@ -341,35 +513,40 @@ export function AssistantPanel({ projectId, onStoryboardChange }: AssistantPanel
             placeholder="告诉 AI 你的想法，或输入 / 选择指令"
             className="h-16 w-full resize-none bg-transparent text-sm outline-none placeholder:text-slate-500 disabled:cursor-not-allowed"
             maxLength={1000}
-            disabled={!projectId || sending}
+            disabled={!projectId || taskActive}
           />
           <div className="mt-2 flex items-center gap-3">
+            {showHtmlStyleControls && (
             <button
               type="button"
               aria-label="添加 HTML 动画风格"
               aria-expanded={stylePickerOpen}
               onClick={() => setStylePickerOpen((open) => !open)}
-              disabled={!projectId || styleSaving}
+              disabled={!projectId || styleSaving || taskActive}
               title={`HTML 动画风格：${selectedStyle.name}`}
               className="flex size-9 shrink-0 items-center justify-center text-emerald-600 transition hover:text-emerald-700 disabled:cursor-not-allowed disabled:text-slate-300"
             >
               <WandSparkles size={20} />
             </button>
+            )}
             <button
               type="button"
               onClick={sendMessage}
-              disabled={!input.trim() || !projectId || sending}
-              className="ml-auto flex h-9 items-center gap-2 rounded-xl bg-[#3868ff] px-4 text-sm font-medium text-white hover:bg-[#1554ff] disabled:cursor-not-allowed disabled:bg-slate-300"
+              disabled={!projectId || (!taskActive && !input.trim())}
+              className={cn(
+                "ml-auto flex h-9 items-center gap-2 rounded-xl px-4 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:bg-slate-300",
+                taskActive ? "bg-rose-600 hover:bg-rose-700" : "bg-[#3868ff] hover:bg-[#1554ff]",
+              )}
             >
-              {sending ? "分析中" : "发送"}
-              <Send size={18} />
+              {taskActive ? activeTaskLabel || "停止修改" : "发送"}
+              {taskActive ? <Square size={16} fill="currentColor" /> : <Send size={18} />}
             </button>
           </div>
         </div>
         <p className="mt-3 text-center text-xs text-slate-500">AI 生成内容仅供参考，请注意核查信息的准确性。</p>
       </div>
 
-      {stylePickerOpen && (
+      {showHtmlStyleControls && stylePickerOpen && (
         <StylePickerCard
           selectedStyleId={selectedStyle.id}
           saving={styleSaving}
@@ -523,7 +700,19 @@ function EmptyState({ title, description }: { title: string; description: string
   );
 }
 
-function MessageBubble({ message, onOpenScript }: { message: LocalAgentMessage; onOpenScript: (script: VideoScriptResult) => void }) {
+function MessageBubble({
+  message,
+  canConfirmAction,
+  confirming,
+  onConfirmRegenerate,
+  onOpenScript,
+}: {
+  message: LocalAgentMessage;
+  canConfirmAction: boolean;
+  confirming: boolean;
+  onConfirmRegenerate: () => void;
+  onOpenScript: (script: VideoScriptResult) => void;
+}) {
   const isUser = message.role === "user";
 
   return (
@@ -535,27 +724,84 @@ function MessageBubble({ message, onOpenScript }: { message: LocalAgentMessage; 
         )}
       >
         {message.pending ? <LoadingBubble /> : <p className="whitespace-pre-wrap break-words">{message.content}</p>}
-        {message.display && <DisplayCard display={message.display} onOpenScript={onOpenScript} />}
+        {message.display && (
+          <DisplayCard
+            display={message.display}
+            canConfirmAction={canConfirmAction}
+            confirming={confirming}
+            onConfirmRegenerate={onConfirmRegenerate}
+            onOpenScript={onOpenScript}
+          />
+        )}
         <p className="mt-3 text-xs text-slate-500">{formatMessageTime(message.createdAt)}</p>
       </div>
     </div>
   );
 }
 
-function LoadingBubble() {
+function LoadingBubble({ compact = false }: { compact?: boolean }) {
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setActiveIndex((current) => (current + 1) % ASSISTANT_WAITING_STEPS.length);
+    }, 1800);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  if (compact) {
+    return (
+      <div className="mt-3 rounded-lg border border-[#c9d9ff] bg-white/70 p-3 text-xs text-slate-700">
+        <div className="flex items-center gap-2 font-medium text-[#1554ff]">
+          <RefreshCw size={14} className="animate-spin" />
+          <span>{ASSISTANT_WAITING_STEPS[activeIndex]}</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex items-center gap-3 text-slate-600">
-      <span>AI 正在分析</span>
-      <span className="flex items-center gap-1" aria-label="AI 正在分析">
-        <span className="size-1.5 animate-bounce rounded-full bg-[#3868ff]" />
-        <span className="size-1.5 animate-bounce rounded-full bg-[#3868ff] [animation-delay:120ms]" />
-        <span className="size-1.5 animate-bounce rounded-full bg-[#3868ff] [animation-delay:240ms]" />
-      </span>
+    <div className="space-y-3 text-slate-600">
+      <div className="flex items-center gap-3">
+        <span>AI 正在处理</span>
+        <span className="flex items-center gap-1" aria-label="AI 正在处理">
+          <span className="size-1.5 animate-bounce rounded-full bg-[#3868ff]" />
+          <span className="size-1.5 animate-bounce rounded-full bg-[#3868ff] [animation-delay:120ms]" />
+          <span className="size-1.5 animate-bounce rounded-full bg-[#3868ff] [animation-delay:240ms]" />
+        </span>
+      </div>
+      <div className="rounded-lg border border-[#d8e4ff] bg-[#f5f8ff] p-3">
+        <div className="space-y-2">
+          {ASSISTANT_WAITING_STEPS.map((step, index) => {
+            const active = index === activeIndex;
+
+            return (
+              <div key={step} className={cn("flex items-center gap-2 text-xs transition", active ? "font-medium text-[#1554ff]" : "text-slate-500")}>
+                <span className={cn("size-1.5 rounded-full", active ? "bg-[#1554ff]" : "bg-slate-300")} />
+                <span>{step}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
 
-function DisplayCard({ display, onOpenScript }: { display: AgentDisplay; onOpenScript: (script: VideoScriptResult) => void }) {
+function DisplayCard({
+  display,
+  canConfirmAction,
+  confirming,
+  onConfirmRegenerate,
+  onOpenScript,
+}: {
+  display: AgentDisplay;
+  canConfirmAction: boolean;
+  confirming: boolean;
+  onConfirmRegenerate: () => void;
+  onOpenScript: (script: VideoScriptResult) => void;
+}) {
   if (display.type === "outline") {
     const previewScenes = display.script?.scenes.slice(0, 3);
 
@@ -567,14 +813,26 @@ function DisplayCard({ display, onOpenScript }: { display: AgentDisplay; onOpenS
             <p className="font-medium">{display.script.title}</p>
             <p className="line-clamp-3 text-xs leading-5 text-slate-600">{display.script.summary}</p>
             <p className="line-clamp-3 text-xs leading-5 text-slate-600">逐字稿：{display.script.transcript}</p>
-            <ol className="space-y-1">
+            <div className="space-y-2">
               {previewScenes?.map((scene) => (
-                <li key={scene.index}>
-                  {scene.index}. {scene.title}
-                </li>
+                <div key={scene.index} className="rounded-lg border border-[#d8e4ff] bg-white/70 p-2">
+                  <div className="flex items-start gap-2">
+                    <span className="flex size-5 shrink-0 items-center justify-center rounded bg-[#edf3ff] text-[11px] font-semibold text-[#1554ff]">{scene.index}</span>
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-medium text-slate-900">{scene.title}</p>
+                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-600">旁白：{scene.narration}</p>
+                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
+                        提示词：{scene.animationPrompt ?? scene.visualPrompt}
+                      </p>
+                    </div>
+                  </div>
+                </div>
               ))}
-            </ol>
+            </div>
             {display.script.scenes.length > 3 && <p className="text-xs text-slate-500">还有 {display.script.scenes.length - 3} 个分镜未显示</p>}
+            <div className="rounded-lg border border-[#c9d9ff] bg-white/80 p-2 text-xs leading-5 text-[#1554ff]">
+              分镜已准备好。你可以点击时间线里的“AI 生成”，也可以直接在对话里输入“开始生成视频”。
+            </div>
             <button
               type="button"
               onClick={() => onOpenScript(display.script as VideoScriptResult)}
@@ -594,6 +852,29 @@ function DisplayCard({ display, onOpenScript }: { display: AgentDisplay; onOpenS
           </ol>
         ) : (
           <p className="mt-2 text-slate-600">AI 已识别为大纲任务，等待后续生成逻辑接入。</p>
+        )}
+      </div>
+    );
+  }
+
+  if (display.type === "confirmation") {
+    return (
+      <div className="mt-3 rounded-lg border border-[#9bb8ff] bg-[#eef4ff] p-3 shadow-[inset_0_0_0_1px_rgba(21,84,255,0.04)]">
+        <DisplayTitle icon={<AlertTriangle size={16} />} title={display.title} />
+        <p className="mt-2 text-[#17315f]">{display.message}</p>
+        {confirming && <LoadingBubble compact />}
+        {canConfirmAction && (
+          <div className="mt-3 border-t border-[#c9d9ff] pt-3">
+            <button
+              type="button"
+              onClick={onConfirmRegenerate}
+              disabled={confirming}
+              className="flex h-8 w-full items-center justify-center gap-2 rounded-lg bg-rose-600 px-3 text-xs font-semibold text-white transition hover:bg-rose-700 disabled:cursor-wait disabled:bg-rose-300"
+            >
+              {confirming ? <RefreshCw size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
+              {confirming ? "正在重新生成" : "确认重新生成"}
+            </button>
+          </div>
         )}
       </div>
     );
